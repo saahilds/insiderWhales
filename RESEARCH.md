@@ -16,9 +16,9 @@ Decisions, data limitations and unresolved issues. Newest entries are added to t
 
 | # | Requirement | Status |
 |---|---|---|
-| T1 | Filing after the close cannot execute at the preceding close | planned (PR 2) |
-| T2 | Weekend disclosure executes no earlier than the next session | planned (PR 2) |
-| T3 | Exchange holidays respected | planned (PR 2) |
+| T1 | Filing after the close cannot execute at the preceding close | done (`tests/test_timing.py`) |
+| T2 | Weekend disclosure executes no earlier than the next session | done (`tests/test_timing.py`) |
+| T3 | Exchange holidays respected | done (`tests/test_timing.py`) |
 | T4 | Cluster cannot trigger before the second disclosure | planned (PR 10) |
 | T5 | Repeat purchases by one insider are not independent insiders | planned (PR 4) |
 | T6 | Amendments cannot change previously available information | planned (PR 4) |
@@ -32,7 +32,7 @@ Decisions, data limitations and unresolved issues. Newest entries are added to t
 | T14 | Transaction costs reduce returns correctly | planned (PR 15) |
 | T15 | Position sizing cannot exceed cash | planned (PR 15) |
 | T16 | Exposure respects limits | planned (PR 15) |
-| T17 | Same inputs and config give identical outputs | planned (PR 2, PR 12) |
+| T17 | Same inputs and config give identical outputs | started (`tests/test_timing.py`); end-to-end in PR 12 |
 | T18 | Event-study returns match hand calculation | planned (PR 11) |
 
 ## Known data limitations

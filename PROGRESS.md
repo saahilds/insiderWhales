@@ -5,7 +5,7 @@ Checklist by milestone. Each item lands in its own PR; tests named "T#" refer to
 ## Milestone 1: Data feasibility
 
 - [x] PR 1: scaffold (uv project, Ruff, pytest, Typer CLI, configs, CI)
-- [ ] PR 2: trading calendar, availability timestamps, execution timing, point-in-time joins (T1, T2, T3, T17 start)
+- [x] PR 2: trading calendar, availability timestamps, execution timing, point-in-time joins (T1, T2, T3, T17 start)
 - [ ] PR 3: SEC ingestion: index discovery, rate-limited client, cache and manifests, one development quarter, schema docs
 - [ ] PR 4: staging and normalization: owners, insider groups, classification, plan status, amendments, events (T5, T6, T7, T8)
 - [ ] PR 5: acceptance timestamps, full-index reconciliation, data-quality report v1
