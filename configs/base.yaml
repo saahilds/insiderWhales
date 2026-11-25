@@ -1,0 +1,77 @@
+# Base configuration for insiderWhales. CLI flags override individual values.
+
+paths:
+  data_dir: data            # overridden by INSIDER_WHALES_DATA_DIR if set
+  reports_dir: reports
+
+sec:
+  # Discovered download links come from this page; URLs are never constructed from a pattern.
+  data_sets_page: https://www.sec.gov/data-research/sec-markets-data/insider-transactions-data-sets
+  full_index_base: https://www.sec.gov/Archives/edgar/full-index
+  submissions_bulk_url: https://www.sec.gov/Archives/edgar/daily-index/bulkdata/submissions.zip
+  submissions_api_base: https://data.sec.gov/submissions
+  archives_base: https://www.sec.gov/Archives/edgar/data
+  max_requests_per_second: 4.0   # SEC fair-access limit is 10; the spec caps us at 5
+  max_retries: 6
+  backoff_base_seconds: 1.0
+  backoff_max_seconds: 60.0
+  timeout_seconds: 120.0
+
+calendar:
+  exchange: XNYS
+  start: "2005-01-01"
+  end: "2027-12-31"
+
+availability:
+  dissemination_buffer_minutes: 5
+  processing_buffer_minutes: 15
+  # Conservative availability for filings with only a filing date: end of that day, New York time.
+  date_only_time: "23:59:59"
+
+execution:
+  primary_mode: open          # open | close
+  extra_delay_sessions: 0
+
+splits:
+  warmup: ["2012-01-01", "2014-12-31"]
+  development: ["2015-01-01", "2020-12-31"]
+  validation: ["2021-01-01", "2022-12-31"]
+  final_test: ["2023-01-01", "2026-09-30"]
+
+universe:
+  min_price: 5.0
+  min_market_cap: 300_000_000
+  min_adv_dollars: 2_000_000
+  adv_window_days: 20
+  market_cap_groups:
+    small: [300_000_000, 2_000_000_000]
+    mid: [2_000_000_000, 10_000_000_000]
+    large: [10_000_000_000, 200_000_000_000]
+    mega: [200_000_000_000, null]
+
+event_study:
+  horizons: [1, 5, 10, 20, 60, 120]
+
+costs:
+  scenarios_bps_round_trip:
+    optimistic: 5
+    baseline: 25
+    conservative: 50
+    stress: 100
+
+portfolio:
+  initial_capital: 100000
+  max_positions: 20
+  target_position_weight: 0.05
+  max_position_weight: 0.05
+  max_sector_weight: 0.25
+  max_adv_participation: 0.01
+  leverage: 1.0
+  allow_fractional_shares: false
+  transaction_cost_bps_round_trip: 25
+
+delisting:
+  # Used only when the price provider has no delisting return.
+  assumed_return_performance_delist: -0.30
+
+seed: 20261125

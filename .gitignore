@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Credentials
+.env
+.env.*
+!.env.example
+
+# Datasets (raw, staging, processed, manifests) are never committed
+data/*
+!data/README.md
+
+# Local databases
+*.duckdb
+*.duckdb.wal
+
+# Generated reports (the folder itself is kept)
+reports/*
+!reports/.gitkeep
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/

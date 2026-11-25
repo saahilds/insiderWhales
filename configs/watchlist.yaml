@@ -1,0 +1,18 @@
+# Universe B: personal watchlist.
+# Example research tickers, not buy recommendations. Historical results for this list are
+# retrospective and subject to selection bias.
+tickers:
+  - NVDA
+  - AMD
+  - AVGO
+  - AMZN
+  - GOOGL
+  - META
+  - MSFT
+  - NFLX
+  - UBER
+  - HOOD
+  - PLTR
+  - TSLA
+  - AAPL
+  - ORCL

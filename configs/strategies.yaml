@@ -1,0 +1,54 @@
+# Predefined strategy parameters (implemented in Milestone 3).
+# Every configuration that is run is also recorded in the experiment registry.
+
+S0_naive_buying:
+  codes: [P]
+  min_value: 25_000
+  holding_days: 60
+
+S1_meaningful_buying:
+  codes: [P]
+  min_value: 100_000
+  min_ownership_increase: 0.05
+  allow_new_position: true
+  roles: [officer, director]
+  plan_status: not_known_scheduled   # discretionary-only is a separate 2023+ variant
+  holding_days: 60
+
+S2_cluster_buying:
+  min_independent_insiders: 2
+  window_calendar_days: 14
+  min_combined_value: 250_000
+  require_officer_or_director: true
+  holding_days: 60
+
+S3_opportunistic_buying:
+  min_value: 100_000
+  lookback_months: 12
+  plan_status: not_known_scheduled
+  holding_days: 60
+
+S4_dip_buying:
+  min_drawdown_from_252d_high: 0.20
+  min_value: 100_000
+  plan_status: not_known_scheduled
+  variants: [S4A_no_fundamental_filter, S4B_positive_fcf, S4C_positive_fcf_and_revenue_growth]
+  holding_days: 120
+
+S5_high_conviction:
+  min_value: 250_000
+  min_ownership_increase: 0.05
+  roles: [ceo, cfo]
+  holding_days: 60
+
+S6_successful_insiders:
+  min_completed_purchases: 5
+  shrinkage: true
+  holding_days: 60
+
+S7_unusual_selling:
+  min_independent_insiders: 2
+  window_calendar_days: 14
+  min_combined_value: 500_000
+  exclude_plan_status: [scheduled]
+  holding_days: 60
