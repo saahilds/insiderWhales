@@ -198,6 +198,49 @@ def validate_filings(
     )
 
 
+@app.command("download-prices")
+def download_prices_cmd(
+    provider: Annotated[str, typer.Option(help="yfinance | csv_import")] = "yfinance",
+    symbol: Annotated[list[str] | None, typer.Option("--symbol", "-s")] = None,
+    start: Annotated[str | None, typer.Option(help="YYYY-MM-DD")] = None,
+    end: Annotated[str | None, typer.Option(help="YYYY-MM-DD")] = None,
+    config: ConfigOpt = None,
+) -> None:
+    """Download sample OHLCV prices and write a coverage report (survivor-only on free data)."""
+    from datetime import date as date_cls
+
+    from insider_whales.ingestion.prices import (
+        build_and_write_security_master,
+        coverage_report_markdown,
+        download_prices,
+        map_sample_prices_to_securities,
+    )
+
+    settings = load_settings(config)
+    secs, ids = build_and_write_security_master(settings)
+    typer.echo(f"securities: {secs.height}; identifiers: {ids.height}")
+    result = download_prices(
+        settings,
+        symbols=symbol,
+        provider_name=provider,
+        start=date_cls.fromisoformat(start) if start else None,
+        end=date_cls.fromisoformat(end) if end else None,
+    )
+    cov = result["coverage"]
+    for status, n in cov.group_by("status").len().sort("status").iter_rows():
+        typer.echo(f"{status}: {n}")
+    report = coverage_report_markdown(cov, result["capabilities"])
+    out = settings.reports_dir / "price_coverage.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(report)
+    typer.echo(f"wrote {out}")
+    try:
+        mapped = map_sample_prices_to_securities(settings)
+        typer.echo(f"mapped price rows to securities: {mapped.height}")
+    except FileNotFoundError:
+        pass
+
+
 @app.command("build-features")
 def build_features(config: ConfigOpt = None) -> None:
     """Compute point-in-time features."""

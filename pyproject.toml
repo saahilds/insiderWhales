@@ -18,6 +18,7 @@ dependencies = [
     "scipy>=1.14",
     "statsmodels>=0.14",
     "typer>=0.12",
+    "yfinance>=0.2.50",
 ]
 
 [project.scripts]

@@ -1,0 +1,24 @@
+# Manual security-identifier overrides. Each entry adds a high-confidence identifier
+# window. Used for ticker remaps, dual classes and holding-company reorganizations.
+#
+# Fields: issuer_cik (required unless security_id is set), value (ticker or other id),
+# id_type (default ticker), share_class (default COMMON), valid_from, valid_to (ISO dates).
+
+- issuer_cik: "0001652044"   # Alphabet
+  share_class: "A"
+  value: GOOGL
+  valid_from: "2015-10-02"
+
+- issuer_cik: "0001652044"
+  share_class: "C"
+  value: GOOG
+  valid_from: "2015-10-02"
+
+- issuer_cik: "0001326801"   # Meta (formerly Facebook)
+  value: META
+  valid_from: "2021-10-28"
+
+- issuer_cik: "0001326801"
+  value: FB
+  valid_from: "2012-05-18"
+  valid_to: "2021-10-27"

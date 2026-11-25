@@ -10,7 +10,7 @@ Checklist by milestone. Each item lands in its own PR; tests named "T#" refer to
 - [x] PR 4: staging and normalization: owners, insider groups, classification, plan status, amendments, events (T5, T6, T7, T8)
 - [x] PR 5: acceptance timestamps, full-index reconciliation, data-quality report v1
 - [x] PR 6: manual validation of at least 30 filings against the original SEC XML
-- [ ] PR 7: price provider interface, yfinance adapter, security master v0, sample price coverage (T9 unit, T10, T11)
+- [x] PR 7: price provider interface, yfinance adapter, security master v0, sample price coverage (T9 unit, T10, T11)
 
 ## Milestone 2: End-to-end prototype (2012–2022)
 
