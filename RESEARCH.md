@@ -55,6 +55,15 @@ Decisions, data limitations and unresolved issues. Newest entries are added to t
 
 67,537 filings → 150,478 transaction lines (107,842 non-derivative) → 16,027 insider events (5,581 purchases, 10,446 sales). Conservative set: 4,895 P lines and 15,476 S lines. Among non-derivative P lines: 5,690 open market confirmed, 6,472 probable, 385 compensation, 128 private, 133 unknown price. Amendments: 975 high, 82 medium and 8 low-confidence links; 656 unmatched, of which 631 amend filings from earlier quarters that are not loaded. One issuer (Hyster-Yale, family members buying under 10b5-1 plans) accounts for 6,125 of the quarter's P lines; aggregation into events and the insider-group logic keep it from dominating counts.
 
+## Acceptance timestamps and data quality (PR 5)
+
+- Acceptance times come from EDGAR's nightly bulk `submissions.zip` (1.58 GB, downloaded at most every 30 days): first the issuer's submission files, then the reporting owners', then up to 200 per-run `-index-headers.html` lookups. `acceptanceDateTime` in the JSON is true UTC (checked against the New York-time header).
+- 2019Q1 and 2023Q3: all 104,573 filings got a timestamp from the issuers' files; no fallback was needed. In 2019Q1 the acceptance date (New York time) always equals the filing date.
+- 2019Q1 timing: 1,422 filings accepted before 09:10 ET (can trade at that day's open), 16,911 during the session, 49,204 after 16:00 ET.
+- Full-index reconciliation, 2019Q1: 67,537 accessions in both the data set and EDGAR's full-index, none missing on either side.
+- Other 2019Q1 quality numbers: no duplicate keys; 630 identical lines within a filing (legitimate repeated lots, kept); 63 transaction dates after the filing date and a transaction date range of 2003–2029 (typos, flagged `bad_transaction_date`); officer title missing on 48% of P/S lines (directors and 10% owners have none); price missing on 0.25%; 71% of P/S lines carry a transaction footnote; median filing lag 2 days, 30% filed more than 2 days after the trade.
+- `uv run insider-whales audit-data` writes `reports/data_quality.json` and `reports/data_quality.md`.
+
 ## Open issues
 
 - Footnote-rule precision and recall are measured on a hand-validated sample in PR 6.

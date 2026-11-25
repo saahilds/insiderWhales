@@ -128,6 +128,41 @@ def normalize(quarter: QuarterOpt = None, config: ConfigOpt = None) -> None:
         typer.echo(f"{name}: {n} rows")
 
 
+@app.command("acceptance-times")
+def acceptance_times(
+    quarter: QuarterOpt = None,
+    header_fallback_limit: Annotated[int, typer.Option(help="Max per-filing header fetches")] = 200,
+    max_age_days: Annotated[int, typer.Option(help="Reuse bulk file younger than this")] = 30,
+    config: ConfigOpt = None,
+) -> None:
+    """Fetch EDGAR acceptance timestamps for staged filings (bulk submissions file)."""
+    from insider_whales.normalization.pipeline import build_timestamps
+
+    ts = build_timestamps(
+        load_settings(config),
+        quarter,
+        header_fallback_limit=header_fallback_limit,
+        max_age_days=max_age_days,
+    )
+    for src, n in ts.group_by("acceptance_source").len().sort("acceptance_source").iter_rows():
+        typer.echo(f"{src}: {n}")
+
+
+@app.command("audit-data")
+def audit_data(
+    quarter: QuarterOpt = None,
+    output_dir: Annotated[Path | None, typer.Option(help="Report folder")] = None,
+    config: ConfigOpt = None,
+) -> None:
+    """Reconcile with EDGAR's full-index and write the data-quality report."""
+    from insider_whales.evaluation.data_quality import run_audit
+
+    settings = load_settings(config)
+    paths = run_audit(settings, quarter, output_dir or settings.reports_dir)
+    for p in paths:
+        typer.echo(f"wrote {p}")
+
+
 @app.command("build-features")
 def build_features(config: ConfigOpt = None) -> None:
     """Compute point-in-time features."""

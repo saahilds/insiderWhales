@@ -90,6 +90,8 @@ def build_filings(submission: pl.DataFrame, cfg: AvailabilityConfig) -> pl.DataF
         df = df.with_columns(pl.lit(None, dtype=pl.Boolean).alias("aff10b5one"))
     if "acceptance_ts" not in df.columns:
         df = df.with_columns(pl.lit(None, dtype=UTC_DTYPE).alias("acceptance_ts"))
+    if "acceptance_source" not in df.columns:
+        df = df.with_columns(pl.lit(None, dtype=pl.String).alias("acceptance_source"))
     df = with_available_at(df, cfg)
     return df.select(
         "accession_number",
@@ -103,6 +105,7 @@ def build_filings(submission: pl.DataFrame, cfg: AvailabilityConfig) -> pl.DataF
         "period_of_report",
         "filing_date",
         "acceptance_ts",
+        "acceptance_source",
         "available_at",
         "availability_basis",
         pl.col("aff10b5one").alias("plan_checkbox"),
@@ -629,10 +632,23 @@ def build_insider_events(
 
 
 def normalize_tables(
-    staged: dict[str, pl.DataFrame], cfg: AvailabilityConfig
+    staged: dict[str, pl.DataFrame],
+    cfg: AvailabilityConfig,
+    timestamps: pl.DataFrame | None = None,
 ) -> dict[str, pl.DataFrame]:
-    """Build all processed tables from staged tables (keys are lower-case table names)."""
-    filings = build_filings(staged["submission"], cfg)
+    """Build all processed tables from staged tables (keys are lower-case table names).
+
+    `timestamps` (accession_number, acceptance_ts, acceptance_source) supplies EDGAR
+    acceptance times; filings without one fall back to the end of their filing date.
+    """
+    submission = staged["submission"]
+    if timestamps is not None:
+        submission = submission.join(
+            timestamps.select("accession_number", "acceptance_ts", "acceptance_source"),
+            on="accession_number",
+            how="left",
+        )
+    filings = build_filings(submission, cfg)
     owners = normalize_owners(staged["reportingowner"], staged["submission"])
     summary = filing_owner_summary(owners)
     filings = link_amendments(

@@ -75,7 +75,11 @@ def normalize(settings: Settings, quarters: list[str] | None = None) -> dict[str
             staged[t.lower()] = load_staged(staging_dir(settings), t, qs)
         except FileNotFoundError:
             continue
-    tables = normalize_tables(staged, settings.availability)
+    ts_path = processed_dir(settings) / "filing_timestamps.parquet"
+    timestamps = pl.read_parquet(ts_path) if ts_path.exists() else None
+    if timestamps is None:
+        log.warning("no acceptance timestamps; run `acceptance-times` (using filing dates)")
+    tables = normalize_tables(staged, settings.availability, timestamps)
     out = processed_dir(settings)
     out.mkdir(parents=True, exist_ok=True)
     for name, df in tables.items():
@@ -89,6 +93,27 @@ def normalize(settings: Settings, quarters: list[str] | None = None) -> dict[str
         }
     )
     return {k: v.height for k, v in tables.items()}
+
+
+def build_timestamps(
+    settings: Settings, quarters: list[str] | None = None, **kwargs
+) -> pl.DataFrame:
+    """Fetch acceptance timestamps for all staged filings and store them as processed data."""
+    import asyncio
+
+    from insider_whales.ingestion.edgar_meta import build_filing_timestamps
+
+    qs = stage_quarters(settings, quarters)
+    submission = load_staged(staging_dir(settings), "SUBMISSION", qs)
+    owners = load_staged(staging_dir(settings), "REPORTINGOWNER", qs)
+    ts = asyncio.run(build_filing_timestamps(settings, submission, owners, **kwargs))
+    out = processed_dir(settings)
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / "filing_timestamps.parquet"
+    if path.exists():
+        ts = pl.concat([ts, pl.read_parquet(path)]).unique("accession_number", keep="first")
+    ts.sort("accession_number").write_parquet(path)
+    return ts
 
 
 def load_processed(settings: Settings, name: str) -> pl.DataFrame:
