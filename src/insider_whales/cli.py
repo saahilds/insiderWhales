@@ -118,6 +118,16 @@ def inspect_sec(
         typer.echo(f"wrote {out}")
 
 
+@app.command()
+def normalize(quarter: QuarterOpt = None, config: ConfigOpt = None) -> None:
+    """Stage downloaded SEC archives and build normalized point-in-time tables."""
+    from insider_whales.normalization.pipeline import normalize as run
+
+    counts = run(load_settings(config), quarter)
+    for name, n in counts.items():
+        typer.echo(f"{name}: {n} rows")
+
+
 @app.command("build-features")
 def build_features(config: ConfigOpt = None) -> None:
     """Compute point-in-time features."""

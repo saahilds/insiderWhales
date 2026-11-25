@@ -20,10 +20,10 @@ Decisions, data limitations and unresolved issues. Newest entries are added to t
 | T2 | Weekend disclosure executes no earlier than the next session | done (`tests/test_timing.py`) |
 | T3 | Exchange holidays respected | done (`tests/test_timing.py`) |
 | T4 | Cluster cannot trigger before the second disclosure | planned (PR 10) |
-| T5 | Repeat purchases by one insider are not independent insiders | planned (PR 4) |
-| T6 | Amendments cannot change previously available information | planned (PR 4) |
-| T7 | Option exercises and tax dispositions excluded | planned (PR 4) |
-| T8 | Missing plan information is not "discretionary" | planned (PR 4) |
+| T5 | Repeat purchases by one insider are not independent insiders | done (`tests/test_normalization.py`) |
+| T6 | Amendments cannot change previously available information | done (`tests/test_normalization.py`) |
+| T7 | Option exercises and tax dispositions excluded | done (`tests/test_normalization.py`) |
+| T8 | Missing plan information is not "discretionary" | done (`tests/test_normalization.py`) |
 | T9 | Split-adjusted position accounting | planned (PR 7, PR 15) |
 | T10 | Delisted stocks not silently removed | planned (PR 7) |
 | T11 | Recycled tickers do not merge companies | planned (PR 7) |
@@ -42,6 +42,20 @@ Decisions, data limitations and unresolved issues. Newest entries are added to t
 - **Rule 10b5-1 checkbox** exists only from about April 2023, is filing-level rather than per transaction, and is encoded inconsistently. Earlier plan status comes only from footnotes and is mostly unknown.
 - **Acceptance timestamps** are not in the SEC bulk insider data sets; they come from EDGAR submissions metadata. Actual public dissemination time is not available for free.
 
+## Normalization rules (PR 4)
+
+- **Research sets.** *Conservative*: code P or S, non-derivative, common equity, price > 0, shares > 0, plausible transaction date (0–730 days before filing), open-market class, filed by an officer or director, original filing (not an amendment), no equity swap. *Sensitivity*: P or S, non-derivative, common/ADR/unclassified title, valid price, shares and date, original filing, any owner role, any class except compensation, option-related or gift.
+- **Transaction class** for P/S lines comes from footnotes attached to transaction columns (not holding columns, which often mention awards that were not traded): option-related, then compensation (ESPP, DRIP, 401(k), tax withholding, …), then private/offering, then open market *confirmed* (weighted-average or open-market wording) or *probable* (no contrary evidence).
+- **Plan status** per line: `scheduled` (footnote or remarks mention a 10b5-1 plan, or the checkbox is ticked on a filing from 2023-04-01 on), `not_scheduled_reported` (explicitly negated, or checkbox present and unticked from 2023-04-01 on), otherwise `unknown`.
+- **Insider groups.** Owner CIKs that co-file for the same issuer form one insider (`<issuer_cik>:<smallest CIK>`); computed point-in-time with `as_of`.
+- **Amendments** are linked to originals in tiers (high/medium/low/unmatched) because the data sets only carry the filer-entered original date, which is sometimes wrong.
+- **Events** aggregate the lines of one filing by insider group, security, date and code. Prior holdings are rebuilt per ownership form; `pct_holdings_change` is null when that is unreliable.
+
+### 2019Q1 sample (development period)
+
+67,537 filings → 150,478 transaction lines (107,842 non-derivative) → 16,027 insider events (5,581 purchases, 10,446 sales). Conservative set: 4,895 P lines and 15,476 S lines. Among non-derivative P lines: 5,690 open market confirmed, 6,472 probable, 385 compensation, 128 private, 133 unknown price. Amendments: 975 high, 82 medium and 8 low-confidence links; 656 unmatched, of which 631 amend filings from earlier quarters that are not loaded. One issuer (Hyster-Yale, family members buying under 10b5-1 plans) accounts for 6,125 of the quarter's P lines; aggregation into events and the insider-group logic keep it from dominating counts.
+
 ## Open issues
 
-None yet.
+- Footnote-rule precision and recall are measured on a hand-validated sample in PR 6.
+- Group links are formed only by co-filing; related owners who never co-file (e.g. a spouse filing separately) stay separate insiders.

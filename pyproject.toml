@@ -50,6 +50,7 @@ ignore = ["RUF001", "RUF002", "RUF003"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["tests"]
 addopts = "-ra -m 'not network'"
 filterwarnings = [
     "ignore::DeprecationWarning:exchange_calendars.*",
