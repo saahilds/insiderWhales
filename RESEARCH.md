@@ -44,8 +44,9 @@ Decisions, data limitations and unresolved issues. Newest entries are added to t
 
 ## Normalization rules (PR 4)
 
-- **Research sets.** *Conservative*: code P or S, non-derivative, common equity, price > 0, shares > 0, plausible transaction date (0–730 days before filing), open-market class, filed by an officer or director, original filing (not an amendment), no equity swap. *Sensitivity*: P or S, non-derivative, common/ADR/unclassified title, valid price, shares and date, original filing, any owner role, any class except compensation, option-related or gift.
-- **Transaction class** for P/S lines comes from footnotes attached to transaction columns (not holding columns, which often mention awards that were not traded): option-related, then compensation (ESPP, DRIP, 401(k), tax withholding, …), then private/offering, then open market *confirmed* (weighted-average or open-market wording) or *probable* (no contrary evidence).
+- **Research sets.** *Conservative*: code P or S, non-derivative, common equity, price > 0, shares > 0, plausible transaction date (0–730 days before filing), open-market class, filed by an officer or director, original filing (not an amendment), no equity swap, and a real reported ticker (not `NONE`/`N/A`). *Sensitivity*: P or S, non-derivative, common/ADR/unclassified title, valid price, shares and date, original filing, any owner role, any class except compensation, option-related or gift.
+- **Transaction class** for P/S lines comes from footnotes attached to transaction columns (not holding columns, which often mention awards that were not traded): option-related, then compensation (ESPP, DRIP, 401(k), tax withholding, …), then private/offering, then open market *confirmed* (weighted-average or open-market wording, unless negated as in "not a weighted average") or *probable* (no contrary evidence).
+- **Exercise-and-sale.** A sale is option-related when shares acquired by exercise or conversion (M, X, C, O) in the same filing on the same date cover at least 80% of the shares sold that day. Added after the manual review found same-day exercise-and-sell filings without any explanatory footnote.
 - **Plan status** per line: `scheduled` (footnote or remarks mention a 10b5-1 plan, or the checkbox is ticked on a filing from 2023-04-01 on), `not_scheduled_reported` (explicitly negated, or checkbox present and unticked from 2023-04-01 on), otherwise `unknown`.
 - **Insider groups.** Owner CIKs that co-file for the same issuer form one insider (`<issuer_cik>:<smallest CIK>`); computed point-in-time with `as_of`.
 - **Amendments** are linked to originals in tiers (high/medium/low/unmatched) because the data sets only carry the filer-entered original date, which is sometimes wrong.
@@ -64,7 +65,15 @@ Decisions, data limitations and unresolved issues. Newest entries are added to t
 - Other 2019Q1 quality numbers: no duplicate keys; 630 identical lines within a filing (legitimate repeated lots, kept); 63 transaction dates after the filing date and a transaction date range of 2003–2029 (typos, flagged `bad_transaction_date`); officer title missing on 48% of P/S lines (directors and 10% owners have none); price missing on 0.25%; 71% of P/S lines carry a transaction footnote; median filing lag 2 days, 30% filed more than 2 days after the trade.
 - `uv run insider-whales audit-data` writes `reports/data_quality.json` and `reports/data_quality.md`.
 
+## Manual validation (PR 6)
+
+- 31 filings drawn by a seeded, stratified sampler from 2019Q1 and 2023Q3: open-market purchases (confirmed and probable), private/offering purchases, compensation-plan purchases, 10b5-1 sales, plan-unknown sales, tax/option-related sales, 4/A amendments, multi-owner filings, indirect holdings, a 10% owner, a Form 5, and 2023 filings with the checkbox ticked and unticked. Sample: `docs/validation/m1-sample.csv`.
+- **Parsing:** each filing's original XML was downloaded from EDGAR and compared with the parsed rows: 318 of 318 field checks match (document type, issuer, ticker, 10b5-1 checkbox, owner set and role flags, every non-derivative line's title, date, code, shares, price within the data set's two-decimal rounding, A/D, shares after, ownership form, footnote references).
+- **Classification:** reviewed by reading footnotes and remarks (`docs/validation/m1-reviews.yaml`). The first pass disagreed on 5 of 31 filings. Three were pipeline errors and are fixed: two exercise-and-sell filings (Twilio, Inspire Medical) classed as open-market sales, and a "not a weighted average" footnote (Great Elm) read as open-market confirmation. The two remaining disagreements (Muzinich BDC, Thrivent Church Loan & Income Fund) are purchases of non-listed funds that are almost certainly direct subscriptions; nothing in the filing text says so. Both are already outside the conservative set (10% owner or other relationship; placeholder or fund ticker), and the security master in PR 7 drops issuers without an exchange listing. Final agreement: 29 of 31.
+- Report: `docs/validation/m1-filing-validation.md`, regenerated by `uv run insider-whales validate-filings` (original XML is cached in the raw store).
+
 ## Open issues
 
-- Footnote-rule precision and recall are measured on a hand-validated sample in PR 6.
+- The validation sample (31 filings) checks the rules but is too small to measure precision and recall of each footnote rule; a larger labelled sample would be needed for that.
+- Sales after a small same-day exercise (e.g. 1,299 exercised, 13,310 sold) stay open-market sales; the 80% coverage threshold is a judgement call.
 - Group links are formed only by co-filing; related owners who never co-file (e.g. a spouse filing separately) stay separate insiders.

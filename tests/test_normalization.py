@@ -395,3 +395,54 @@ def test_normalization_is_deterministic():
     b = normalize_tables(staged(*args), AVAIL)
     for name in a:
         assert a[name].equals(b[name]), name
+
+
+# --- rules added after the Milestone 1 manual review ---------------------------------------
+
+
+def test_exercise_and_same_day_sale_is_option_related_only_when_covered():
+    subs = [{"accession_number": a} for a in ("T1", "Z1")]
+    owners = [{"accession_number": a} for a in ("T1", "Z1")]
+    sale = {"trans_code": "S", "trans_acquired_disp_cd": "D", "trans_pricepershare": 100.0}
+    trans = [
+        # Exercise 1,000 and sell 1,000 the same day: exercise-and-sell.
+        {
+            "accession_number": "T1",
+            "nonderiv_trans_sk": 1,
+            "trans_code": "M",
+            "trans_pricepershare": 20.0,
+        },
+        {"accession_number": "T1", "nonderiv_trans_sk": 2, **sale},
+        # Exercise 100 but sell 1,000: mostly other shares, stays an open-market sale.
+        {
+            "accession_number": "Z1",
+            "nonderiv_trans_sk": 1,
+            "trans_code": "M",
+            "trans_shares": 100.0,
+            "trans_pricepershare": 20.0,
+        },
+        {"accession_number": "Z1", "nonderiv_trans_sk": 2, **sale},
+    ]
+    lines = ps_lines(normalized(subs, owners, trans)).filter(pl.col("trans_code") == "S")
+    got = dict(zip(lines["accession_number"], lines["txn_class"], strict=True))
+    assert got == {"T1": "option_related", "Z1": "open_market_probable"}
+
+
+def test_negated_weighted_average_is_not_open_market_confirmation():
+    t = normalized(
+        *one_filing(trans_pricepershare_fn="F1"),
+        footnotes=[
+            {
+                "accession_number": "A1",
+                "footnote_id": "F1",
+                "footnote_txt": "The price reported is not a weighted average price.",
+            }
+        ],
+    )
+    assert ps_lines(t)["txn_class"][0] == "open_market_probable"
+
+
+def test_placeholder_ticker_excluded_from_conservative_set():
+    line = ps_lines(normalized(*one_filing(sub={"issuertradingsymbol": "NONE"}))).row(0, named=True)
+    assert "no_reported_ticker" in line["exclusion_reasons"]
+    assert not line["is_conservative_set"] and line["is_sensitivity_set"]

@@ -1,0 +1,171 @@
+# Milestone 1 manual review of sampled filings.
+#
+# Each entry records what a reviewer concluded after reading the original filing on EDGAR
+# (footnotes, remarks, owners). It is the expected answer, not a copy of pipeline output.
+# Keys: txn_class / plan_status / conservative (values across the filing's P and S lines),
+# events (insider events built from the filing), insider_groups, note.
+# Reviewer: cloud agent, 25 Nov 2026. Sample: docs/validation/m1-sample.csv.
+
+reviews:
+  0001209191-19-016626:  # Keurig Dr Pepper, officer purchase
+    txn_class: [open_market_confirmed, open_market_probable]
+    plan_status: unknown
+    conservative: true
+    events: 2
+  0001127602-19-011476:  # Hyster-Yale, director buying through family LP interests
+    txn_class: [open_market_confirmed, open_market_probable]
+    plan_status: unknown
+    conservative: true
+    events: 2
+    insider_groups: 1
+  0001158172-23-000095:  # comScore, CFO purchase
+    txn_class: open_market_confirmed
+    plan_status: not_scheduled_reported
+    conservative: true
+    events: 1
+    note: Title is "See Remarks"; the remarks say Chief Financial Officer and the pipeline resolves the role to CFO.
+  0001127602-23-022264:  # CVB Financial, director purchases via family trusts
+    txn_class: open_market_confirmed
+    plan_status: not_scheduled_reported
+    conservative: true
+    events: 2
+  0001415889-23-013441:  # German American Bancorp, director purchase, no footnotes
+    txn_class: open_market_probable
+    plan_status: not_scheduled_reported
+    conservative: true
+    events: 1
+  0000095953-19-000037:  # Synalloy, officer purchase plus tax withholding (F)
+    txn_class: open_market_probable
+    plan_status: unknown
+    conservative: true
+    events: 1
+  0001645873-23-000159:  # Modiv, director purchase
+    txn_class: open_market_probable
+    plan_status: not_scheduled_reported
+    conservative: true
+    events: 1
+  0001683168-19-000684:  # eXp World, director bought directly from the issuer
+    txn_class: private
+    conservative: false
+    events: 0
+    note: Footnote says the shares were bought directly from the issuer in a private placement; the same filing reports old restricted-stock awards (code A).
+  0001144204-19-006351:  # Monocle Acquisition (SPAC), sponsor private placement units
+    txn_class: private
+    conservative: false
+    events: 0
+  0000707605-19-000005:  # AmeriServ, Form 5 code P for 401(k) plan activity
+    txn_class: compensation
+    conservative: false
+    events: 0
+  0000743367-19-000024:  # Bar Harbor, dividend reinvestment in 401(k)
+    txn_class: compensation
+    conservative: false
+    events: 0
+  0001104659-23-080420:  # Inspire Medical, director exercise-and-sell under a 10b5-1 plan
+    txn_class: option_related
+    plan_status: scheduled
+    conservative: false
+    events: 0
+    note: 1,000 options exercised and 529 shares sold the same day. The pipeline first classed the 500-share sale as an open-market sale; fixed by the exercise-and-sale rule added in this PR.
+  0001127602-19-013073:  # Twilio, officer exercise/conversion and same-day sale
+    txn_class: option_related
+    plan_status: scheduled
+    conservative: false
+    events: 0
+    note: 24,487 shares acquired by option exercise and Class B conversion and 24,487 sold the same day. Originally classed as open-market sales; fixed by the exercise-and-sale rule.
+  0001214659-19-001403:  # ANSYS, officer sale two days after PRSU settlement
+    txn_class: open_market_confirmed
+    plan_status: scheduled
+    conservative: true
+    events: 1
+    note: The sale is two trading days after the PRSU settlement, so it is not an exercise-and-sale. A holdings footnote mentions ESPP shares and correctly does not taint the sale.
+  0001209191-19-012253:  # Zebra Technologies, director sale after a small exercise
+    txn_class: open_market_probable
+    plan_status: unknown
+    conservative: true
+    events: 1
+    note: 1,299 options exercised but 13,310 shares sold the same day, so most shares sold were already held. Kept as an open-market sale; this is a judgement call.
+  0001437749-19-000829:  # QAD, President (also director and 10% owner) sale
+    txn_class: open_market_confirmed
+    plan_status: unknown
+    conservative: true
+    events: 1
+  0001209191-23-044177:  # Federated Hermes, sale to cover taxes on vesting
+    txn_class: compensation
+    plan_status: not_scheduled_reported
+    conservative: false
+    events: 0
+  0001607939-23-000176:  # Udemy, CFO sale to cover RSU taxes
+    txn_class: compensation
+    plan_status: not_scheduled_reported
+    conservative: false
+    events: 0
+  0001091818-19-000096:  # ZZLL, 4/A correcting a transaction date
+    txn_class: unknown
+    conservative: false
+    events: 0
+    note: Amendment only corrects the date; it is a new version visible from its own acceptance time and is never in the research sets.
+  0000899243-19-005569:  # Itron, 4/A replacing a tax-withholding sale
+    txn_class: compensation
+    conservative: false
+    events: 0
+  0001415889-23-013444:  # German American Bancorp, 4/A of a director purchase
+    txn_class: open_market_probable
+    plan_status: not_scheduled_reported
+    conservative: false
+    events: 0
+    note: The dividend-reinvestment mention is a footnote on the holding, not on the purchase.
+  0000899243-19-008879:  # Itron, Scopia (10% owner fund group, four joint filers)
+    txn_class: open_market_probable
+    plan_status: scheduled
+    conservative: false
+    events: 2
+    insider_groups: 1
+    note: Four reporting owners on one filing are one insider; 10% owner only, so sensitivity set only.
+  0000899243-19-001645:  # Great Elm Capital, MAST Capital (10% owner) sales
+    txn_class: open_market_probable
+    plan_status: unknown
+    conservative: false
+    events: 3
+    insider_groups: 1
+    note: Footnote says the price is NOT a weighted average. The pipeline first read that as weighted-average evidence ("confirmed"); fixed by negation handling.
+  0000945621-23-000437:  # Muzinich BDC, 10% owner fund purchases
+    txn_class: private
+    plan_status: not_scheduled_reported
+    conservative: false
+    note: Non-traded BDC (ticker NONE); the purchases are almost certainly capital-call subscriptions from the issuer. Nothing in the filing text says so, so the pipeline cannot tell. It is still kept out of the conservative set (10% owner, no listed ticker), and the security master drops unlisted issuers.
+  0001505732-23-000224:  # Bankwell Financial, director purchase
+    txn_class: open_market_probable
+    plan_status: not_scheduled_reported
+    conservative: true
+    events: 1
+    note: Restricted-stock footnotes are on holdings and correctly ignored.
+  0001127602-19-001236:  # Hyster-Yale, family member (relationship Other) buying under a 10b5-1 plan
+    txn_class: [open_market_confirmed, open_market_probable]
+    plan_status: scheduled
+    conservative: false
+    events: 2
+  0000898432-19-000091:  # Thrivent Church Loan & Income Fund, non-listed interval fund
+    txn_class: private
+    conservative: false
+    note: Shares of a non-listed interval fund (fund ticker XCLIX) bought by subscription, not on an exchange. Not detectable from the filing text; excluded later as a fund with no exchange listing.
+  0001762003-19-000004:  # Flex Pharma, Form 5 sales by a 10% owner foundation
+    txn_class: open_market_probable
+    plan_status: unknown
+    conservative: false
+    events: 1
+  0001125376-23-000153:  # Ensign Group, director sales under a 10b5-1 plan
+    txn_class: open_market_probable
+    plan_status: scheduled
+    conservative: true
+    events: 2
+  0001381197-23-000107:  # Interactive Brokers, CIO sales, checkbox ticked
+    txn_class: open_market_confirmed
+    plan_status: scheduled
+    conservative: true
+    events: 2
+  0001209191-23-048858:  # Embecta, director purchase, checkbox unticked
+    txn_class: open_market_confirmed
+    plan_status: not_scheduled_reported
+    conservative: true
+    events: 1

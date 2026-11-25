@@ -163,6 +163,41 @@ def audit_data(
         typer.echo(f"wrote {p}")
 
 
+@app.command("validate-filings")
+def validate_filings(
+    resample: Annotated[bool, typer.Option(help="Draw a new sample")] = False,
+    config: ConfigOpt = None,
+) -> None:
+    """Compare sampled filings with their original SEC XML and the recorded manual reviews."""
+    import json
+
+    from insider_whales.evaluation.filing_validation import run_validation
+    from insider_whales.normalization.pipeline import load_processed
+
+    settings = load_settings(config)
+    tables = {
+        n: load_processed(settings, n)
+        for n in ("filings", "reporting_owners", "transactions", "insider_events")
+    }
+    vdir = REPO_ROOT / "docs" / "validation"
+    out = run_validation(
+        settings,
+        tables,
+        vdir / "m1-sample.csv",
+        vdir / "m1-reviews.yaml",
+        vdir / "m1-filing-validation.md",
+        resample=resample,
+    )
+    dump = settings.data_dir / "processed" / "validation" / "m1_results.json"
+    dump.parent.mkdir(parents=True, exist_ok=True)
+    dump.write_text(json.dumps(out["results"], indent=2, default=str))
+    results = out["results"]
+    typer.echo(
+        f"{sum(r['parse']['all_match'] for r in results)}/{len(results)} filings match the "
+        f"original XML on every check; details in docs/validation/m1-filing-validation.md"
+    )
+
+
 @app.command("build-features")
 def build_features(config: ConfigOpt = None) -> None:
     """Compute point-in-time features."""

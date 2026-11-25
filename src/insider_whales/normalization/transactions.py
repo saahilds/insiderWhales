@@ -70,6 +70,9 @@ OPEN_MARKET_RE = (
     r"(?i)weighted.average|multiple transactions|range of prices|prices? rang(ing|ed)|"
     r"open[- ]market|on the (nasdaq|nyse|new york stock exchange)|broker[- ]dealer"
 )
+OPEN_MARKET_NEGATED_RE = r"(?i)not (a |the )?weighted.average|not (an? )?open[- ]market"
+EXERCISE_COVERAGE = 0.8  # same-day exercised shares covering this share of a sale
+PLACEHOLDER_TICKERS = ("", "NONE", "N/A", "NA", "-", "NOT APPLICABLE", "NOT LISTED")
 
 OPTION_CODES = ("M", "X", "C", "O", "E", "H")
 COMPENSATION_CODES = ("A", "F", "D", "I", "L")
@@ -242,7 +245,7 @@ def _txn_class() -> pl.Expr:
         .then(pl.lit("gift"))
         .when(~is_ps)
         .then(pl.lit("other"))
-        .when(txt.str.contains(OPTION_RE))
+        .when(txt.str.contains(OPTION_RE) | pl.col("exercise_and_sale"))
         .then(pl.lit("option_related"))
         .when(txt.str.contains(COMPENSATION_RE))
         .then(pl.lit("compensation"))
@@ -250,7 +253,7 @@ def _txn_class() -> pl.Expr:
         .then(pl.lit("private"))
         .when(pl.col("trans_pricepershare").is_null() | (pl.col("trans_pricepershare") <= 0))
         .then(pl.lit("unknown"))
-        .when(txt.str.contains(OPEN_MARKET_RE))
+        .when(txt.str.contains(OPEN_MARKET_RE) & ~txt.str.contains(OPEN_MARKET_NEGATED_RE))
         .then(pl.lit("open_market_confirmed"))
         .otherwise(pl.lit("open_market_probable"))
         .alias("txn_class")
@@ -294,6 +297,40 @@ def _plan_status() -> pl.Expr:
         .otherwise(pl.lit("none"))
     )
     return [status.alias("plan_status"), evidence.alias("plan_evidence")]
+
+
+def _flag_exercise_and_sale(t: pl.DataFrame) -> pl.DataFrame:
+    """Flag sales funded by same-day option exercises or conversions in the same filing.
+
+    A sale counts as option-related when non-derivative shares acquired through exercise or
+    conversion (codes M, X, C, O) on the same date cover most of the shares sold that day.
+    """
+    nd = t.filter(pl.col("table") == "nonderiv")
+    key = ["accession_number", "trans_date"]
+    exercised = (
+        nd.filter(pl.col("trans_code").is_in(["M", "X", "C", "O"]))
+        .group_by(key)
+        .agg(pl.col("trans_shares").sum().alias("_exercised"))
+    )
+    sold = (
+        nd.filter(pl.col("trans_code") == "S")
+        .group_by(key)
+        .agg(pl.col("trans_shares").sum().alias("_sold"))
+    )
+    cover = exercised.join(sold, on=key).with_columns(
+        (pl.col("_exercised") >= EXERCISE_COVERAGE * pl.col("_sold")).alias("_covered")
+    )
+    return (
+        t.join(cover.select(*key, "_covered"), on=key, how="left")
+        .with_columns(
+            (
+                (pl.col("trans_code") == "S")
+                & (pl.col("table") == "nonderiv")
+                & pl.col("_covered").fill_null(False)
+            ).alias("exercise_and_sale")
+        )
+        .drop("_covered")
+    )
 
 
 def build_transactions(
@@ -362,6 +399,7 @@ def build_transactions(
             how="left",
         )
     )
+    t = _flag_exercise_and_sale(t)
     t = t.with_columns(
         security_class_expr("security_title"),
         share_class_expr("security_title"),
@@ -387,6 +425,10 @@ def build_transactions(
         "ten_pct_or_other_only": ~pl.col("is_officer_or_director").fill_null(False),
         "amendment_version": pl.col("is_amendment"),
         "equity_swap": pl.col("equity_swap_involved").fill_null(False),
+        "no_reported_ticker": pl.col("reported_ticker")
+        .fill_null("")
+        .str.to_uppercase()
+        .is_in(PLACEHOLDER_TICKERS),
     }
     t = t.with_columns(
         pl.concat_list(
@@ -460,6 +502,7 @@ def build_transactions(
         "plan_status",
         "plan_evidence",
         "plan_checkbox",
+        "exercise_and_sale",
         "exclusion_reasons",
         "is_conservative_set",
         "is_sensitivity_set",
