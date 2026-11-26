@@ -18,6 +18,10 @@ EXIT_SLACK_DAYS = 5
 ENTRY_SLACK_DAYS = 7
 
 
+def _finite_or_null(expr: pl.Expr) -> pl.Expr:
+    return pl.when(expr.is_finite()).then(expr)
+
+
 def forward_returns(
     events: pl.DataFrame,
     adjusted: pl.DataFrame,
@@ -91,7 +95,9 @@ def forward_returns(
         "entry_price",
         *[f"exit_date_{h}" for h in horizons],
         *[
-            (pl.col(f"_x_tr_{h}") / pl.col("_e_tr") * pl.col("_intraday") - 1).alias(f"ret_{h}")
+            _finite_or_null(pl.col(f"_x_tr_{h}") / pl.col("_e_tr") * pl.col("_intraday") - 1).alias(
+                f"ret_{h}"
+            )
             for h in horizons
         ],
     ]

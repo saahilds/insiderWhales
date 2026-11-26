@@ -417,10 +417,27 @@ def fetch_prices(
         raise typer.Exit(code=3)
 
 
+@app.command("build-sectors")
+def build_sectors_cmd(config: ConfigOpt = None) -> None:
+    """Sector ETF per issuer from SIC codes in the EDGAR submissions archive."""
+    from insider_whales.ingestion.sectors import build_sectors
+
+    table = build_sectors(load_settings(config))
+    typer.echo(
+        f"{table.height:,} issuers; {table['sector_etf'].null_count():,} without a sector mapping"
+    )
+
+
 @app.command("event-study")
 def event_study(config: ConfigOpt = None) -> None:
-    """Run the baseline event study."""
-    _not_yet("event-study", "Milestone 2")
+    """Baseline event study on the development period (2015-2020)."""
+    from insider_whales.evaluation.event_study import run_event_study
+    from insider_whales.evaluation.event_study_report import write_markdown
+
+    settings = load_settings(config)
+    result = run_event_study(settings)
+    doc = write_markdown(result, REPO_ROOT / "docs" / "results" / "event-study-baseline.md")
+    typer.echo(f"{result['events'].height:,} events; wrote {doc}")
 
 
 @app.command()

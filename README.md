@@ -50,6 +50,15 @@ uv run insider-whales build-features       # point-in-time features and developm
 
 Feature definitions and coverage: `docs/data/features.md`.
 
+## Event study
+
+```bash
+uv run insider-whales build-sectors        # SIC code to sector ETF per issuer (SEC submissions archive)
+uv run insider-whales event-study          # baseline purchase/sale study on 2015-2020
+```
+
+Writes event tables to `data/processed/event_study/`, CSVs to `reports/event_study/` and the write-up `docs/results/event-study-baseline.md`. Results are exploratory and survivor-only; the study never reads prices after 2020-12-31.
+
 ## Layout
 
 ```
