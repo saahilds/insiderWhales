@@ -59,6 +59,18 @@ uv run insider-whales event-study          # baseline purchase/sale study on 201
 
 Writes event tables to `data/processed/event_study/`, CSVs to `reports/event_study/` and the write-up `docs/results/event-study-baseline.md`. Results are exploratory and survivor-only; the study never reads prices after 2020-12-31.
 
+## Report, pipeline and run manifest
+
+```bash
+uv run insider-whales report                # reports/report.html: data quality, price coverage, event study
+uv run insider-whales pipeline              # every step end to end, then reports/run_manifest.json
+uv run insider-whales pipeline --offline    # skip the network steps (SEC ingest, prices, benchmarks)
+uv run insider-whales pipeline --start build-features
+uv run insider-whales verify-determinism    # run the offline analysis steps twice and compare every output
+```
+
+Pipeline steps, in order: `ingest-sec`, `build-universe`, `fetch-prices --all`, `fetch-benchmarks`, `build-fundamentals`, `build-sectors`, `build-features`, `coverage`, `event-study`, `report`. Network steps are resumable and skip cached work; a failed step stops the run and the manifest still records it. `reports/run_manifest.json` holds the git commit, package, Python and Polars versions, seed, config and config hash, SEC data versions, per-step status and timings, and content digests of every analysis output. It is the only file with wall-clock time. The report contains no timestamps, so identical inputs give an identical file.
+
 ## Layout
 
 ```

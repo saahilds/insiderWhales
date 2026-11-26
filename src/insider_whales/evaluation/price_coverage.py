@@ -194,6 +194,7 @@ def series_verdicts(pairs: pl.DataFrame) -> pl.DataFrame:
             ).alias("series_mismatch"),
             (pl.col("n_checked") < MIN_CHECKS).alias("series_unverified"),
         )
+        .sort("security_id", "symbol")
     )
 
 

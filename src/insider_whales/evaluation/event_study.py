@@ -14,6 +14,7 @@ from typing import Any
 
 import numpy as np
 import polars as pl
+import polars.selectors as cs
 
 from insider_whales.calendar import TradingCalendar, get_calendar
 from insider_whales.config import Settings
@@ -60,7 +61,7 @@ def load_study_events(settings: Settings) -> pl.DataFrame:
         )
         .rename({"symbol_used": "symbol", "trans_code": "direction"})
     )
-    return out.with_columns(
+    return out.sort("event_id").with_columns(
         pl.col("direction").replace_strict({"P": "purchase", "S": "sale"}),
         ((pl.col("vwap") >= MIN_PRICE) & (pl.col("mkt_adv_20") >= MIN_ADV)).alias("tradable"),
         pl.col("entry_session").dt.year().alias("entry_year"),
@@ -443,7 +444,7 @@ def build_study_table(settings: Settings) -> tuple[pl.DataFrame, pl.DataFrame, p
     modal = (
         ev_all.group_by("symbol_used", "issuer_cik")
         .len()
-        .sort("len", descending=True)
+        .sort(["symbol_used", "len", "issuer_cik"], descending=[False, True, False])
         .group_by("symbol_used", maintain_order=True)
         .first()
     )
@@ -469,6 +470,11 @@ def build_study_table(settings: Settings) -> tuple[pl.DataFrame, pl.DataFrame, p
     return add_buckets(events.with_columns(derived)), pairs, adjusted
 
 
+def _stable(df: pl.DataFrame) -> pl.DataFrame:
+    """Parallel reductions differ in the last floating-point digits between runs; round them."""
+    return df.with_columns(cs.float().round(10))
+
+
 def run_event_study(settings: Settings) -> dict[str, Any]:
     """Build the study table, statistics and paths; write them under `reports/event_study`."""
     horizons = list(settings.event_study.horizons)
@@ -483,9 +489,9 @@ def run_event_study(settings: Settings) -> dict[str, Any]:
     events.write_parquet(pdir / "event_study_events.parquet")
     pairs.write_parquet(pdir / "matched_controls.parquet")
 
-    headline = summarize(events, horizons)
-    tradable = summarize(events.filter(pl.col("tradable")), horizons)
-    ctime = calendar_time(events, horizons)
+    headline = _stable(summarize(events, horizons))
+    tradable = _stable(summarize(events.filter(pl.col("tradable")), horizons))
+    ctime = _stable(calendar_time(events, horizons))
     subgroups = []
     for column in SUBGROUPS:
         df = summarize(
@@ -496,15 +502,20 @@ def run_event_study(settings: Settings) -> dict[str, Any]:
             by=["value"],
         ).with_columns(pl.lit(column).alias("grouping"))
         subgroups.append(df)
-    subgroups_df = pl.concat(subgroups, how="diagonal_relaxed")
-    paths = cumulative_paths(
-        events, pairs, adjusted, benchmarks, cal, settings.execution.primary_mode, cutoff
+    subgroups_df = _stable(pl.concat(subgroups, how="diagonal_relaxed"))
+    paths = _stable(
+        cumulative_paths(
+            events, pairs, adjusted, benchmarks, cal, settings.execution.primary_mode, cutoff
+        )
     )
-    headline.write_csv(out / "headline.csv")
-    tradable.write_csv(out / "headline_tradable.csv")
-    ctime.write_csv(out / "calendar_time.csv")
-    subgroups_df.write_csv(out / "subgroups.csv")
-    paths.write_csv(out / "paths.csv")
+    for name, table in (
+        ("headline", headline),
+        ("headline_tradable", tradable),
+        ("calendar_time", ctime),
+        ("subgroups", subgroups_df),
+        ("paths", paths),
+    ):
+        table.write_csv(out / f"{name}.csv")
     return {
         "events": events,
         "headline": headline,

@@ -448,8 +448,57 @@ def backtest(config: ConfigOpt = None) -> None:
 
 @app.command()
 def report(config: ConfigOpt = None) -> None:
-    """Build the HTML research report."""
-    _not_yet("report", "Milestone 2")
+    """Build the HTML research report from the reports written by earlier steps."""
+    from insider_whales.reporting.html_report import build_report
+
+    typer.echo(f"wrote {build_report(load_settings(config))}")
+
+
+@app.command()
+def pipeline(
+    offline: Annotated[
+        bool, typer.Option(help="Skip steps that use the network (ingest, prices, benchmarks)")
+    ] = False,
+    start: Annotated[str | None, typer.Option(help="First step to run")] = None,
+    only: Annotated[
+        list[str] | None, typer.Option(help="Run only these steps (repeatable)")
+    ] = None,
+    config: ConfigOpt = None,
+) -> None:
+    """Run every step end to end, then write reports/run_manifest.json.
+
+    Steps: ingest-sec, build-universe, fetch-prices, fetch-benchmarks, build-fundamentals,
+    build-sectors, build-features, coverage, event-study, report. Network steps are resumable.
+    """
+    from insider_whales.pipeline import run_pipeline
+
+    settings = load_settings(config)
+    try:
+        records, path = run_pipeline(
+            settings, config, offline=offline, start=start, only=only, say=typer.echo
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"wrote {path}")
+    if any(r["status"] != "ok" for r in records):
+        raise typer.Exit(code=1)
+
+
+@app.command("verify-determinism")
+def verify_determinism_cmd(
+    start: Annotated[str, typer.Option(help="First offline step to repeat")] = "build-sectors",
+    config: ConfigOpt = None,
+) -> None:
+    """Run the offline analysis steps twice and check every output is identical (Test 17)."""
+    from insider_whales.pipeline import verify_determinism
+
+    result = verify_determinism(load_settings(config), config, start=start, say=typer.echo)
+    typer.echo(f"{result['files']} output files compared")
+    if not result["identical"]:
+        for name in result["differing"]:
+            typer.secho(f"differs: {name}", fg="red")
+        raise typer.Exit(code=1)
+    typer.secho("identical", fg="green")
 
 
 if __name__ == "__main__":

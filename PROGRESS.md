@@ -18,7 +18,7 @@ Checklist by milestone. Each item lands in its own PR; tests named "T#" refer to
 - [x] PR 9: security master and prices at scale, coverage report (`build-universe`, `fetch-prices`, `coverage`)
 - [x] PR 10: fundamentals (SEC XBRL) and features (T4, T12, T13) (`build-fundamentals`, `fetch-benchmarks`, `build-features`)
 - [x] PR 11: event study engine and baseline results on development data (T18) (`build-sectors`, `event-study`)
-- [ ] PR 12: reporting v1, run manifest, end-to-end pipeline (T17)
+- [x] PR 12: reporting v1, run manifest, end-to-end pipeline (T17) (`report`, `pipeline`, `verify-determinism`)
 
 ## Milestone 3: Strategy research
 

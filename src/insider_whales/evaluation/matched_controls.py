@@ -109,4 +109,4 @@ def match_controls(
     return pl.DataFrame(
         {"event_id": out_event, "control_symbol": out_symbol, "rank": out_rank},
         schema={"event_id": pl.String, "control_symbol": pl.String, "rank": pl.Int64},
-    )
+    ).sort("event_id", "rank")
