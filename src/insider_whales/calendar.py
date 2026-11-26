@@ -11,6 +11,7 @@ from typing import Literal
 import exchange_calendars as xcals
 import numpy as np
 import pandas as pd
+import polars as pl
 
 ExecutionMode = Literal["open", "close"]
 
@@ -91,6 +92,24 @@ class TradingCalendar:
         idx += extra_delay_sessions
         session = self._session_at(idx)
         return ExecutionBar(session=session, timestamp=self._ts(times[idx]), mode=mode)
+
+    def first_executable_sessions(
+        self,
+        available_at: pl.Series,
+        mode: ExecutionMode = "open",
+        extra_delay_sessions: int = 0,
+    ) -> pl.Series:
+        """Vectorized `first_executable_bar(...).session` for a column of UTC timestamps.
+
+        Uses the same search over the same session times, so it cannot disagree with the
+        scalar method (tested). Times outside the calendar range come back null.
+        """
+        times = self._opens if mode == "open" else self._closes
+        ns = available_at.dt.cast_time_unit("ns").cast(pl.Int64).to_numpy()
+        idx = np.searchsorted(times, ns, side="left") + extra_delay_sessions
+        valid = (idx >= 0) & (idx < len(self._sessions))
+        sessions = [self._sessions[i] if ok else None for i, ok in zip(idx, valid, strict=True)]
+        return pl.Series("entry_session", sessions, dtype=pl.Date)
 
     def _session_at(self, idx: int) -> date:
         if idx < 0 or idx >= len(self._sessions):

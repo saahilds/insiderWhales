@@ -11,9 +11,11 @@ Limitations (also reported in every result through `capabilities`):
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -50,15 +52,48 @@ CAPABILITIES = ProviderCapabilities(
 HistoryFetcher = Callable[[str, date, date], pd.DataFrame]
 
 
-def _yahoo_history(symbol: str, start: date, end: date) -> pd.DataFrame:
-    import yfinance as yf
+class NoDataError(Exception):
+    """The provider answered, and has no price history for this symbol (final, cacheable)."""
 
-    return yf.Ticker(symbol).history(
-        start=start.isoformat(),
-        end=(end + timedelta(days=1)).isoformat(),
-        auto_adjust=False,
-        actions=True,
-    )
+
+class RateLimitedError(Exception):
+    """The provider is throttling us; back off and retry later."""
+
+
+class ProviderTransientError(Exception):
+    """A fetch failed for a reason that may go away (network, throttling); never cached."""
+
+    def __init__(self, message: str, rate_limited: bool = False):
+        super().__init__(message)
+        self.rate_limited = rate_limited
+
+
+@dataclass(frozen=True)
+class FetchResult:
+    symbol: str
+    status: str  # ok | missing
+    reason: str | None
+    ohlcv: pl.DataFrame
+    actions: pl.DataFrame
+
+
+def _yahoo_history(symbol: str, start: date, end: date) -> pd.DataFrame:
+    """One Yahoo history call; Yahoo's "no data" answers become `NoDataError`."""
+    import yfinance as yf
+    from yfinance import exceptions as yfe
+
+    yf.config.debug.hide_exceptions = False
+    try:
+        return yf.Ticker(symbol).history(
+            start=start.isoformat(),
+            end=(end + timedelta(days=1)).isoformat(),
+            auto_adjust=False,
+            actions=True,
+        )
+    except (yfe.YFPricesMissingError, yfe.YFTzMissingError, yfe.YFTickerMissingError) as e:
+        raise NoDataError(str(e)) from e
+    except yfe.YFRateLimitError as e:
+        raise RateLimitedError(str(e)) from e
 
 
 def history_to_frames(symbol: str, hist: pd.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame]:
@@ -127,11 +162,14 @@ class YFinanceProvider:
         fetch: HistoryFetcher | None = None,
         pause_seconds: float = 0.5,
         raw_dir: Path | None = None,
+        attempts: int = 3,
+        rate_limit_backoff: float = 20.0,
     ):
         self._fetch = fetch or _yahoo_history
         self._pause = pause_seconds
         self._raw_dir = raw_dir
-        self._cache: dict[tuple[str, date, date], tuple[pl.DataFrame, pl.DataFrame]] = {}
+        self._attempts = attempts
+        self._rate_limit_backoff = rate_limit_backoff
 
     def _raw_path(self, symbol: str, start: date, end: date) -> Path | None:
         if self._raw_dir is None:
@@ -139,40 +177,67 @@ class YFinanceProvider:
         safe = symbol.replace("/", "_")
         return self._raw_dir / safe / f"{start.isoformat()}_{end.isoformat()}.parquet"
 
-    def _fetch_raw(self, symbol: str, start: date, end: date) -> pd.DataFrame | None:
-        """Provider response exactly as received, cached once per symbol and date range."""
+    def _sidecar(self, path: Path) -> Path:
+        return path.with_suffix(".reason.json")
+
+    def _fetch_raw(self, symbol: str, start: date, end: date) -> tuple[pd.DataFrame, str | None]:
+        """Provider response exactly as received, cached once per symbol and date range.
+
+        Returns (history, reason); an empty history carries the provider's reason. Throttling
+        and network errors are retried with backoff and then raised as `ProviderTransientError`
+        without writing anything to the cache, so a later run asks again.
+        """
         path = self._raw_path(symbol, start, end)
         if path is not None and path.exists():
-            return pd.read_parquet(path)
-        hist = None
-        for attempt in range(3):
+            side = self._sidecar(path)
+            reason = json.loads(side.read_text())["reason"] if side.exists() else None
+            return pd.read_parquet(path), reason
+        hist: pd.DataFrame | None = None
+        reason: str | None = None
+        last_error = "no attempt made"
+        rate_limited = False
+        for attempt in range(self._attempts):
             try:
                 hist = self._fetch(symbol, start, end)
                 break
+            except NoDataError as e:
+                hist, reason = pd.DataFrame(), str(e)
+                break
+            except RateLimitedError as e:
+                last_error, rate_limited = f"rate limited: {e}", True
+                time.sleep(self._rate_limit_backoff * 2**attempt)
             except Exception as e:  # yfinance raises many exception types
+                last_error, rate_limited = f"{type(e).__name__}: {e}", False
                 log.warning("yfinance %s attempt %d failed: %s", symbol, attempt + 1, e)
                 time.sleep(self._pause * 2**attempt)
         else:
-            return None  # transient failure: do not cache, retry next run
+            raise ProviderTransientError(last_error, rate_limited)
         if self._pause:
             time.sleep(self._pause)
+        frame = hist if hist is not None else pd.DataFrame()
+        if frame.empty:
+            reason = reason or "provider returned no rows"
         if path is not None:
             path.parent.mkdir(parents=True, exist_ok=True)
-            frame = hist if hist is not None else pd.DataFrame()
             frame.to_parquet(path)
-        return hist
+            if reason:
+                self._sidecar(path).write_text(json.dumps({"reason": reason}))
+        return frame, reason
 
-    def _load(self, symbol: str, start: date, end: date):
-        key = (symbol, start, end)
-        if key not in self._cache:
-            self._cache[key] = history_to_frames(symbol, self._fetch_raw(symbol, start, end))
-        return self._cache[key]
+    def fetch(self, symbol: str, start: date, end: date) -> FetchResult:
+        """Raw prices and actions plus an explicit status (`ok` or `missing` with a reason)."""
+        hist, reason = self._fetch_raw(symbol, start, end)
+        ohlcv, actions = history_to_frames(symbol, hist)
+        if ohlcv.height == 0:
+            reason = reason or "provider returned no rows"
+            return FetchResult(symbol, "missing", reason, ohlcv, actions)
+        return FetchResult(symbol, "ok", None, ohlcv, actions)
 
     def ohlcv(self, symbol: str, start: date, end: date) -> pl.DataFrame:
-        return self._load(symbol, start, end)[0]
+        return self.fetch(symbol, start, end).ohlcv
 
     def corporate_actions(self, symbol: str, start: date, end: date) -> pl.DataFrame:
-        return self._load(symbol, start, end)[1]
+        return self.fetch(symbol, start, end).actions
 
     def identifiers(self, symbol: str) -> pl.DataFrame:
         raise NotSupportedError("yfinance has no historical identifiers")

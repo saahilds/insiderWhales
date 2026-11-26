@@ -275,6 +275,106 @@ def download_prices_cmd(
         pass
 
 
+@app.command("build-universe")
+def build_universe_cmd(
+    refresh_listings: Annotated[bool, typer.Option(help="Refetch SEC current listings")] = False,
+    config: ConfigOpt = None,
+) -> None:
+    """Security master and universe roster from Form 3/4/5 history plus current SEC listings."""
+    from insider_whales.ingestion.prices import build_and_write_security_master
+    from insider_whales.ingestion.universe import write_universe
+
+    settings = load_settings(config)
+    secs, ids = build_and_write_security_master(settings)
+    typer.echo(f"securities: {secs.height:,}; identifiers: {ids.height:,}")
+    universe, symbols = write_universe(settings, refresh_listings)
+    typer.echo(
+        f"universe: {universe.height:,} securities "
+        f"({int(universe['currently_listed'].sum()):,} currently listed); "
+        f"candidate symbols: {symbols.height:,}"
+    )
+
+
+@app.command("coverage")
+def coverage_cmd(config: ConfigOpt = None) -> None:
+    """Event-level price status and coverage by year, market cap and transaction type."""
+    from insider_whales.evaluation.price_coverage import build_event_prices, write_reports
+
+    settings = load_settings(config)
+    table = build_event_prices(settings)
+    paths = write_reports(
+        settings, table, settings.reports_dir / "price_coverage", REPO_ROOT / "docs" / "data"
+    )
+    ok = int((table["price_status"] == "ok").sum())
+    typer.echo(f"{table.height:,} events; {ok:,} with usable prices ({ok / table.height:.1%})")
+    for p in paths:
+        typer.echo(f"wrote {p}")
+
+
+@app.command("fetch-prices")
+def fetch_prices(
+    sample: Annotated[
+        int | None, typer.Option(help="Stratified subset of N symbols (deterministic)")
+    ] = None,
+    all_symbols: Annotated[bool, typer.Option("--all", help="Every candidate symbol")] = False,
+    workers: Annotated[int, typer.Option(help="Parallel requests")] = 3,
+    pause_seconds: Annotated[
+        float, typer.Option(help="Pause after each request, per worker")
+    ] = 0.4,
+    retry_missing: Annotated[
+        bool, typer.Option(help="Ask again for symbols with no history")
+    ] = False,
+    start: Annotated[str, typer.Option(help="YYYY-MM-DD")] = "2011-01-01",
+    end: Annotated[str, typer.Option(help="YYYY-MM-DD")] = "2022-12-31",
+    config: ConfigOpt = None,
+) -> None:
+    """Download daily prices (yfinance) for the universe. Resumable: rerun to continue.
+
+    Symbols with a final outcome (prices written, or the provider has none) are skipped;
+    throttled or failed ones are retried. Stops early if Yahoo keeps throttling.
+    """
+    from datetime import date as date_cls
+
+    from insider_whales.ingestion.price_runner import (
+        consolidate_prices,
+        fetch_symbols,
+        stratified_sample,
+    )
+    from insider_whales.normalization.pipeline import processed_dir
+
+    if not (sample or all_symbols):
+        raise typer.BadParameter("give --sample N or --all")
+    settings = load_settings(config)
+    path = processed_dir(settings) / "candidate_symbols.parquet"
+    if not path.exists():
+        raise typer.BadParameter("run build-universe first")
+    import polars as pl
+
+    candidates = pl.read_parquet(path)
+    symbols = (
+        candidates["symbol"].to_list()
+        if all_symbols
+        else stratified_sample(candidates, sample, settings.seed)
+    )
+    typer.echo(f"{len(symbols):,} symbols requested")
+    counts = fetch_symbols(
+        settings,
+        symbols,
+        start=date_cls.fromisoformat(start),
+        end=date_cls.fromisoformat(end),
+        workers=workers,
+        pause_seconds=pause_seconds,
+        retry_missing=retry_missing,
+        say=typer.echo,
+    )
+    typer.echo(f"done: {counts}")
+    n_p, n_a = consolidate_prices(settings)
+    typer.echo(f"prices_daily rows: {n_p:,}; corporate actions: {n_a:,}")
+    if counts.get("aborted_by_rate_limit"):
+        typer.secho("stopped early: Yahoo is throttling; rerun later to resume", fg="red")
+        raise typer.Exit(code=3)
+
+
 @app.command("build-features")
 def build_features(config: ConfigOpt = None) -> None:
     """Compute point-in-time features."""

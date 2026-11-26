@@ -147,8 +147,10 @@ def _cov(symbol, status, reason, caps: ProviderCapabilities, **extra) -> dict:
 
 
 def build_and_write_security_master(settings: Settings) -> tuple[pl.DataFrame, pl.DataFrame]:
-    filings = load_processed(settings, "filings")
-    transactions = load_processed(settings, "transactions")
+    filings = load_processed(settings, "filings", ["issuer_cik", "reported_ticker", "filing_date"])
+    transactions = load_processed(
+        settings, "transactions", ["issuer_cik", "security_title", "table"]
+    )
     overrides = load_overrides(REPO_ROOT / "configs" / "security_overrides.yaml")
     securities, identifiers = build_securities(filings, transactions, overrides)
     out = processed_dir(settings)

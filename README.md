@@ -29,6 +29,17 @@ uv run insider-whales ingest-sec --start 2012q1 --end 2022q4
 
 This downloads, stages, timestamps, normalizes and audits every quarter in the range. It is safe to interrupt (Ctrl-C or kill) and rerun with the same arguments: unchanged downloads are skipped by hash, finished quarters by input fingerprint, and acceptance times are only fetched for filings that do not have one yet. Needs roughly 3 GB of disk and 4 GB of memory.
 
+## Building the security master and downloading prices
+
+```bash
+uv run insider-whales build-universe          # security master, universe, candidate symbols
+uv run insider-whales fetch-prices --sample 300   # representative subset (deterministic)
+uv run insider-whales fetch-prices --all      # every candidate symbol, 2011-01-01 to 2022-12-31
+uv run insider-whales coverage                # event-level price status and coverage report
+```
+
+`fetch-prices` is resumable: rerun the same command to continue. Symbols with a final outcome (prices written, or Yahoo has no history) are skipped, throttled or timed-out ones are retried, and it stops with exit code 3 if Yahoo keeps throttling. Add `--retry-missing` to ask again for symbols with no history. Progress is in `data/manifests/price_fetch_yfinance.jsonl`; raw responses are cached in `data/raw/prices/yfinance/`. Expect roughly 12,800 symbols and about 1.5 hours at 3 workers on a home connection. If a run slows to a crawl (timeouts of 10 s with no bytes), stop it and rerun; a fresh process recovers.
+
 ## Layout
 
 ```

@@ -32,6 +32,10 @@ class SecConfig(_Strict):
     submissions_bulk_url: str
     submissions_api_base: str
     archives_base: str
+    company_tickers_url: str = "https://www.sec.gov/files/company_tickers_exchange.json"
+    companyfacts_bulk_url: str = (
+        "https://www.sec.gov/Archives/edgar/daily-index/xbrl/companyfacts.zip"
+    )
     max_requests_per_second: float = Field(4.0, gt=0, le=5.0)
     max_retries: int = Field(6, ge=0)
     backoff_base_seconds: float = 1.0
