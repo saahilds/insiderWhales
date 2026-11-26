@@ -43,6 +43,7 @@ class TradingCalendar:
         self.exchange = exchange
         self._sessions: list[date] = [d.date() for d in sched.index]
         self._session_index = {d: i for i, d in enumerate(self._sessions)}
+        self._session_days = np.array(self._sessions, dtype="datetime64[D]").astype("int64")
         self._opens = _utc_ns(sched["open"])
         self._closes = _utc_ns(sched["close"])
 
@@ -110,6 +111,23 @@ class TradingCalendar:
         valid = (idx >= 0) & (idx < len(self._sessions))
         sessions = [self._sessions[i] if ok else None for i, ok in zip(idx, valid, strict=True)]
         return pl.Series("entry_session", sessions, dtype=pl.Date)
+
+    def _day_numbers(self, dates: pl.Series) -> np.ndarray:
+        return dates.cast(pl.Date).cast(pl.Int32).to_numpy().astype("int64")
+
+    def shift_sessions(self, dates: pl.Series, n: int) -> pl.Series:
+        """The session `n` sessions after the first session on or after each date (null outside
+        the calendar). `n = 0` snaps a non-session date forward to the next session."""
+        idx = np.searchsorted(self._session_days, self._day_numbers(dates), side="left") + n
+        valid = (idx >= 0) & (idx < len(self._sessions))
+        out = [self._sessions[i] if ok else None for i, ok in zip(idx, valid, strict=True)]
+        return pl.Series(dates.name, out, dtype=pl.Date)
+
+    def sessions_between(self, start: pl.Series, end: pl.Series) -> pl.Series:
+        """Number of sessions after `start` up to and including `end` (0 for the same day)."""
+        a = np.searchsorted(self._session_days, self._day_numbers(start), side="right")
+        b = np.searchsorted(self._session_days, self._day_numbers(end), side="right")
+        return pl.Series("sessions", (b - a).tolist(), dtype=pl.Int64)
 
     def _session_at(self, idx: int) -> date:
         if idx < 0 or idx >= len(self._sessions):

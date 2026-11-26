@@ -295,6 +295,48 @@ def build_universe_cmd(
     )
 
 
+@app.command("build-fundamentals")
+def build_fundamentals_cmd(config: ConfigOpt = None) -> None:
+    """Shares outstanding and annual financials per issuer from the SEC companyfacts archive."""
+    import polars as pl
+
+    from insider_whales.ingestion.fundamentals import build_fundamentals
+    from insider_whales.normalization.pipeline import processed_dir
+
+    settings = load_settings(config)
+    ciks = pl.read_parquet(processed_dir(settings) / "universe.parquet")["issuer_cik"].unique()
+    shares, facts = build_fundamentals(settings, ciks.to_list())
+    typer.echo(
+        f"{ciks.len():,} issuers: {shares.height:,} share counts, {facts.height:,} annual facts "
+        f"({facts['issuer_cik'].n_unique():,} issuers with financials)"
+    )
+
+
+@app.command("fetch-benchmarks")
+def fetch_benchmarks_cmd(config: ConfigOpt = None) -> None:
+    """Download benchmark ETF prices (SPY, IWM, MDY and the sector SPDRs)."""
+    from insider_whales.ingestion.benchmarks import BENCHMARKS, fetch_benchmarks
+
+    settings = load_settings(config)
+    adjusted = fetch_benchmarks(settings, say=typer.echo)
+    typer.echo(
+        f"{adjusted['symbol'].n_unique()} of {len(BENCHMARKS)} benchmarks, {adjusted.height:,} bars"
+    )
+
+
+@app.command("build-features")
+def build_features_cmd(config: ConfigOpt = None) -> None:
+    """Point-in-time features and development-period outcomes for every insider event."""
+    import logging
+
+    from insider_whales.features.build import build_event_features
+
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    settings = load_settings(config)
+    table = build_event_features(settings)
+    typer.echo(f"{table.height:,} events x {table.width} columns")
+
+
 @app.command("coverage")
 def coverage_cmd(config: ConfigOpt = None) -> None:
     """Event-level price status and coverage by year, market cap and transaction type."""
@@ -373,12 +415,6 @@ def fetch_prices(
     if counts.get("aborted_by_rate_limit"):
         typer.secho("stopped early: Yahoo is throttling; rerun later to resume", fg="red")
         raise typer.Exit(code=3)
-
-
-@app.command("build-features")
-def build_features(config: ConfigOpt = None) -> None:
-    """Compute point-in-time features."""
-    _not_yet("build-features", "Milestone 2")
 
 
 @app.command("event-study")

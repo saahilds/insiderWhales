@@ -19,6 +19,7 @@ import polars as pl
 
 from insider_whales.calendar import get_calendar
 from insider_whales.config import Settings
+from insider_whales.features.fundamentals import shares_asof
 from insider_whales.ingestion.price_runner import latest_status, prices_dir, status_manifest
 from insider_whales.normalization.pipeline import processed_dir, scan_processed
 
@@ -274,26 +275,6 @@ def explain_missing(
     return pl.DataFrame(
         rows, schema={"event_id": pl.String, "missing_reason": pl.String}, orient="row"
     )
-
-
-def shares_asof(events: pl.DataFrame, shares: pl.DataFrame) -> pl.DataFrame:
-    """Cover-page shares outstanding known at the filing date (latest filed on or before it)."""
-    s = (
-        shares.filter(pl.col("filed").is_not_null())
-        .select("issuer_cik", "filed", "shares", "multi_class")
-        .sort("issuer_cik", "filed")
-    )
-    e = events.select("event_id", "issuer_cik", "filing_date").sort("issuer_cik", "filing_date")
-    out = e.join_asof(
-        s,
-        left_on="filing_date",
-        right_on="filed",
-        by="issuer_cik",
-        strategy="backward",
-        check_sortedness=False,
-        tolerance="800d",
-    )
-    return out.select("event_id", pl.col("shares").alias("shares_outstanding"), "multi_class")
 
 
 def build_event_prices(settings: Settings) -> pl.DataFrame:

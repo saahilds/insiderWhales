@@ -14,8 +14,8 @@ from insider_whales.evaluation.price_coverage import (
     explain_missing,
     market_cap_group,
     series_verdicts,
-    shares_asof,
 )
+from insider_whales.features.fundamentals import shares_asof
 from insider_whales.ingestion.fundamentals import shares_from_facts
 from insider_whales.ingestion.price_runner import fetch_symbols, latest_status, status_manifest
 from insider_whales.ingestion.providers.yfinance_provider import (
@@ -232,7 +232,10 @@ def test_shares_are_taken_as_of_the_filing_date():
         {
             "event_id": ["a", "b"],
             "issuer_cik": ["1", "1"],
-            "filing_date": [date(2019, 4, 1), date(2019, 6, 1)],
+            "available_at": [
+                datetime(2019, 4, 1, 15, tzinfo=UTC),
+                datetime(2019, 6, 1, 15, tzinfo=UTC),
+            ],
         }
     )
     out = shares_asof(events, shares).sort("event_id")

@@ -31,12 +31,12 @@ Market cap = Form 4 price x cover-page shares outstanding known at the filing da
 
 | Group | Events | With prices | Coverage | Full horizon |
 |---|---|---|---|---|
-| micro | 122,470 | 68,162 | 55.7% | 52.5% |
-| small | 120,373 | 68,289 | 56.7% | 54.2% |
-| mid | 89,540 | 61,830 | 69.0% | 66.0% |
-| large | 53,853 | 45,625 | 84.7% | 81.1% |
-| mega | 3,808 | 3,367 | 88.4% | 84.0% |
-| unknown | 60,655 | 42,466 | 70.0% | 65.9% |
+| micro | 122,446 | 68,149 | 55.7% | 52.5% |
+| small | 120,355 | 68,287 | 56.7% | 54.2% |
+| mid | 89,532 | 61,824 | 69.0% | 66.0% |
+| large | 53,836 | 45,609 | 84.7% | 81.1% |
+| mega | 3,799 | 3,365 | 88.6% | 84.2% |
+| unknown | 60,731 | 42,505 | 70.0% | 65.8% |
 
 ## By transaction type (conservative set)
 

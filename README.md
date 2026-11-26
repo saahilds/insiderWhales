@@ -40,6 +40,16 @@ uv run insider-whales coverage                # event-level price status and cov
 
 `fetch-prices` is resumable: rerun the same command to continue. Symbols with a final outcome (prices written, or Yahoo has no history) are skipped, throttled or timed-out ones are retried, and it stops with exit code 3 if Yahoo keeps throttling. Add `--retry-missing` to ask again for symbols with no history. Progress is in `data/manifests/price_fetch_yfinance.jsonl`; raw responses are cached in `data/raw/prices/yfinance/`. Expect roughly 12,800 symbols and about 1.5 hours at 3 workers on a home connection. If a run slows to a crawl (timeouts of 10 s with no bytes), stop it and rerun; a fresh process recovers.
 
+## Fundamentals, benchmarks and features
+
+```bash
+uv run insider-whales build-fundamentals   # shares outstanding and annual financials (SEC companyfacts)
+uv run insider-whales fetch-benchmarks     # SPY, IWM, MDY and the sector SPDR ETFs
+uv run insider-whales build-features       # point-in-time features and development-period outcomes
+```
+
+Feature definitions and coverage: `docs/data/features.md`.
+
 ## Layout
 
 ```

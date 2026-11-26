@@ -13,7 +13,7 @@ import logging
 import re
 import zipfile
 from collections.abc import Iterable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import polars as pl
@@ -36,6 +36,49 @@ SHARES_SCHEMA = {
     "multi_class": pl.Boolean,
 }
 MEMBER_RE = re.compile(r"CIK(\d{10})\.json$")
+
+# Standard metric -> us-gaap tags in order of preference. Companies switch tags over time (e.g.
+# revenue), so each metric is resolved per filing and period, taking the first tag present.
+FLOW_METRICS: dict[str, tuple[str, ...]] = {
+    "revenue": (
+        "Revenues",
+        "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "SalesRevenueNet",
+        "RevenueFromContractWithCustomerIncludingAssessedTax",
+        "SalesRevenueGoodsNet",
+    ),
+    "net_income": ("NetIncomeLoss", "ProfitLoss"),
+    "op_cash_flow": ("NetCashProvidedByUsedInOperatingActivities",),
+    "capex": ("PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsToAcquireProductiveAssets"),
+}
+INSTANT_METRICS: dict[str, tuple[str, ...]] = {
+    "assets": ("Assets",),
+    "liabilities": ("Liabilities",),
+    "equity": (
+        "StockholdersEquity",
+        "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+    ),
+    "cash": (
+        "CashAndCashEquivalentsAtCarryingValue",
+        "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
+    ),
+    "debt_total": ("LongTermDebt", "DebtLongtermAndShorttermCombinedAmount"),
+    "debt_noncurrent": ("LongTermDebtNoncurrent",),
+    "debt_current": ("DebtCurrent", "LongTermDebtCurrent"),
+}
+ANNUAL_FORMS = {"10-K", "10-K/A", "10-KT", "10-KT/A", "10-K405"}
+ANNUAL_DAYS = (330, 400)
+FACT_SCHEMA = {
+    "issuer_cik": pl.String,
+    "metric": pl.String,
+    "tag_rank": pl.Int8,
+    "period_start": pl.String,
+    "period_end": pl.String,
+    "filed": pl.String,
+    "accession_number": pl.String,
+    "form": pl.String,
+    "value": pl.Float64,
+}
 
 
 async def ensure_companyfacts_bulk(
@@ -105,6 +148,69 @@ def shares_from_facts(payload: dict) -> list[dict]:
     return rows
 
 
+def annual_facts_from_payload(payload: dict) -> list[dict]:
+    """Annual (10-K) values of the standard metrics, one row per filing and period."""
+    gaap = payload.get("facts", {}).get("us-gaap", {})
+    cik = str(payload.get("cik", "")).zfill(10)
+    rows: list[dict] = []
+    for table, instant in ((FLOW_METRICS, False), (INSTANT_METRICS, True)):
+        for metric, tags in table.items():
+            for rank, tag in enumerate(tags):
+                for item in gaap.get(tag, {}).get("units", {}).get("USD", []):
+                    if item.get("form") not in ANNUAL_FORMS or item.get("val") is None:
+                        continue
+                    start, end = item.get("start"), item.get("end")
+                    if not (end and item.get("filed") and item.get("accn")):
+                        continue
+                    if instant != (start is None):
+                        continue
+                    if not instant:
+                        days = (date.fromisoformat(end) - date.fromisoformat(start)).days
+                        if not ANNUAL_DAYS[0] <= days <= ANNUAL_DAYS[1]:
+                            continue
+                    rows.append(
+                        {
+                            "issuer_cik": cik,
+                            "metric": metric,
+                            "tag_rank": rank,
+                            "period_start": start,
+                            "period_end": end,
+                            "filed": item["filed"],
+                            "accession_number": item["accn"],
+                            "form": item["form"],
+                            "value": float(item["val"]),
+                        }
+                    )
+    return rows
+
+
+def extract_all(zip_path: Path, ciks: Iterable[str]) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Cover-page shares and annual facts for the given CIKs, in one pass over the archive."""
+    wanted = {str(int(c)).zfill(10) for c in ciks}
+    shares: list[dict] = []
+    facts: list[dict] = []
+    with zipfile.ZipFile(zip_path) as zf:
+        names = [n for n in zf.namelist() if (m := MEMBER_RE.search(n)) and m.group(1) in wanted]
+        for name in sorted(names):
+            try:
+                payload = json.loads(zf.read(name))
+            except json.JSONDecodeError as e:
+                log.warning("unreadable companyfacts member %s: %s", name, e)
+                continue
+            shares.extend(shares_from_facts(payload))
+            facts.extend(annual_facts_from_payload(payload))
+    s_schema = {**SHARES_SCHEMA, "period_end": pl.String, "filed": pl.String}
+    shares_df = pl.DataFrame(shares, schema=s_schema).with_columns(
+        pl.col("period_end").str.to_date(strict=False), pl.col("filed").str.to_date(strict=False)
+    )
+    facts_df = pl.DataFrame(facts, schema=FACT_SCHEMA).with_columns(
+        pl.col("period_start").str.to_date(strict=False),
+        pl.col("period_end").str.to_date(strict=False),
+        pl.col("filed").str.to_date(strict=False),
+    )
+    return shares_df, facts_df
+
+
 def extract_shares(zip_path: Path, ciks: Iterable[str]) -> pl.DataFrame:
     """Shares-outstanding versions for the given issuer CIKs."""
     wanted = {str(int(c)).zfill(10) for c in ciks}
@@ -123,10 +229,22 @@ def extract_shares(zip_path: Path, ciks: Iterable[str]) -> pl.DataFrame:
     )
 
 
-def build_shares_outstanding(settings: Settings, ciks: Iterable[str]) -> pl.DataFrame:
+def build_fundamentals(
+    settings: Settings, ciks: Iterable[str]
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Write `shares_outstanding.parquet` and `annual_facts.parquet` for the given issuers."""
     zip_path = asyncio.run(ensure_companyfacts_bulk(settings))
-    df = extract_shares(zip_path, ciks)
+    shares, facts = extract_all(zip_path, ciks)
     out = settings.data_dir / "processed" / "fundamentals"
     out.mkdir(parents=True, exist_ok=True)
-    df.sort("issuer_cik", "filed", "period_end").write_parquet(out / "shares_outstanding.parquet")
-    return df
+    shares.sort("issuer_cik", "filed", "period_end").write_parquet(
+        out / "shares_outstanding.parquet"
+    )
+    facts.sort("issuer_cik", "metric", "filed", "period_end").write_parquet(
+        out / "annual_facts.parquet"
+    )
+    return shares, facts
+
+
+def build_shares_outstanding(settings: Settings, ciks: Iterable[str]) -> pl.DataFrame:
+    return build_fundamentals(settings, ciks)[0]
