@@ -674,25 +674,28 @@ def build_insider_events(
 # --- orchestration --------------------------------------------------------------------------
 
 
-def normalize_tables(
-    staged: dict[str, pl.DataFrame],
+def build_global_tables(
+    submission: pl.DataFrame,
+    reportingowner: pl.DataFrame,
     cfg: AvailabilityConfig,
     timestamps: pl.DataFrame | None = None,
 ) -> dict[str, pl.DataFrame]:
-    """Build all processed tables from staged tables (keys are lower-case table names).
+    """Tables that need every quarter at once: filings, owners and insider groups.
 
-    `timestamps` (accession_number, acceptance_ts, acceptance_source) supplies EDGAR
+    Amendments can be filed in a later quarter than the filing they amend, and insider groups
+    are connected components across all filings of an issuer, so these cannot be built per
+    quarter. `timestamps` (accession_number, acceptance_ts, acceptance_source) supplies EDGAR
     acceptance times; filings without one fall back to the end of their filing date.
     """
-    submission = staged["submission"]
+    sub = submission
     if timestamps is not None:
-        submission = submission.join(
+        sub = sub.join(
             timestamps.select("accession_number", "acceptance_ts", "acceptance_source"),
             on="accession_number",
             how="left",
         )
-    filings = build_filings(submission, cfg)
-    owners = normalize_owners(staged["reportingowner"], staged["submission"])
+    filings = build_filings(sub, cfg)
+    owners = normalize_owners(reportingowner, submission)
     summary = filing_owner_summary(owners)
     filings = link_amendments(
         filings.join(
@@ -703,13 +706,30 @@ def normalize_tables(
         filings.select("accession_number", "issuer_cik", "available_at"), on="accession_number"
     )
     groups = insider_groups(filing_owner_rows)
+    return {
+        "filings": filings,
+        "reporting_owners": owners,
+        "owner_summary": summary,
+        "insider_groups": groups,
+    }
+
+
+def build_transaction_tables(
+    staged: dict[str, pl.DataFrame], global_tables: dict[str, pl.DataFrame]
+) -> dict[str, pl.DataFrame]:
+    """Transaction lines and insider events for the accessions present in `staged`.
+
+    Every row is independent of other filings (same-day exercise matching is per filing), so
+    this can run one source quarter at a time to bound memory.
+    """
+    filings = global_tables["filings"]
     transactions = build_transactions(
         staged["nonderiv_trans"],
         staged.get("deriv_trans"),
         staged["footnotes"],
         filings,
-        summary,
-        groups,
+        global_tables["owner_summary"],
+        global_tables["insider_groups"],
     )
     holdings = staged.get("nonderiv_holding")
     if holdings is not None:
@@ -720,11 +740,23 @@ def normalize_tables(
             .with_columns(security_class_expr(), share_class_expr())
             .with_columns(provisional_security_id())
         )
-    events = build_insider_events(transactions, holdings)
     return {
-        "filings": filings,
-        "reporting_owners": owners,
-        "insider_groups": groups,
         "transactions": transactions,
-        "insider_events": events,
+        "insider_events": build_insider_events(transactions, holdings),
+    }
+
+
+def normalize_tables(
+    staged: dict[str, pl.DataFrame],
+    cfg: AvailabilityConfig,
+    timestamps: pl.DataFrame | None = None,
+) -> dict[str, pl.DataFrame]:
+    """Build all processed tables in memory from staged tables (lower-case table names)."""
+    g = build_global_tables(staged["submission"], staged["reportingowner"], cfg, timestamps)
+    out = build_transaction_tables(staged, g)
+    return {
+        "filings": g["filings"],
+        "reporting_owners": g["reporting_owners"],
+        "insider_groups": g["insider_groups"],
+        **out,
     }

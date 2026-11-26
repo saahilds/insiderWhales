@@ -202,4 +202,4 @@ def test_inspect_archive_and_schema_changes(tmp_path):
             "reordered": False,
         }
     ]
-    assert "`AFF10B5ONE` | **no** | yes" in render_schema_markdown(registry)
+    assert "| `AFF10B5ONE` | 2023q1 |" in render_schema_markdown(registry)

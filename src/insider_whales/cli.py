@@ -119,13 +119,47 @@ def inspect_sec(
 
 
 @app.command()
-def normalize(quarter: QuarterOpt = None, config: ConfigOpt = None) -> None:
+def normalize(
+    quarter: QuarterOpt = None,
+    stop_after: Annotated[
+        int | None, typer.Option(help="Stop after N newly built quarters (resume demo)")
+    ] = None,
+    config: ConfigOpt = None,
+) -> None:
     """Stage downloaded SEC archives and build normalized point-in-time tables."""
     from insider_whales.normalization.pipeline import normalize as run
 
-    counts = run(load_settings(config), quarter)
+    counts = run(load_settings(config), quarter, stop_after=stop_after)
     for name, n in counts.items():
         typer.echo(f"{name}: {n} rows")
+
+
+@app.command("ingest-sec")
+def ingest_sec(
+    start: Annotated[str, typer.Option(help="First quarter")] = "2012q1",
+    end: Annotated[str, typer.Option(help="Last quarter")] = "2022q4",
+    header_fallback_limit: Annotated[int, typer.Option(help="Max per-filing header fetches")] = 200,
+    stop_after: Annotated[
+        int | None, typer.Option(help="Stop after N newly built quarters (resume demo)")
+    ] = None,
+    audit: Annotated[bool, typer.Option(help="Run the data-quality audit at the end")] = True,
+    config: ConfigOpt = None,
+) -> None:
+    """Resumable SEC pipeline: download, schema, stage, timestamps, normalize, drift, audit.
+
+    Safe to interrupt; rerun with the same arguments to continue where it stopped.
+    """
+    from insider_whales.ingestion.ingest import run_ingest
+
+    run_ingest(
+        load_settings(config),
+        start,
+        end,
+        header_fallback_limit=header_fallback_limit,
+        stop_after=stop_after,
+        audit=audit,
+        say=typer.echo,
+    )
 
 
 @app.command("acceptance-times")

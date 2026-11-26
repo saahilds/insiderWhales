@@ -15,7 +15,13 @@ from insider_whales.ingestion.edgar_meta import fetch_form_index, reconcile_with
 from insider_whales.ingestion.sec import SchemaRegistry, SecDataSets, schema_changes
 from insider_whales.io.http import SecClient
 from insider_whales.io.manifest import Manifest
-from insider_whales.normalization.pipeline import load_processed, load_staged, staging_dir
+from insider_whales.normalization.pipeline import (
+    load_processed,
+    load_staged,
+    processed_dir,
+    scan_processed,
+    staging_dir,
+)
 
 # Spec fields to preserve per transaction → (table, column) in the processed data.
 PRESERVED_FIELDS = {
@@ -55,7 +61,9 @@ def _counts(df: pl.DataFrame, *cols: str) -> list[dict[str, Any]]:
     return df.group_by(list(cols)).len().sort(list(cols)).to_dicts()
 
 
-def field_coverage(tables: dict[str, pl.DataFrame]) -> dict[str, Any]:
+def field_coverage(
+    tables: dict[str, pl.DataFrame], footnote_share: float | None = None
+) -> dict[str, Any]:
     tx = tables["transactions"].filter(
         pl.col("trans_code").is_in(["P", "S"]) & (pl.col("table") == "nonderiv")
     )
@@ -83,7 +91,10 @@ def field_coverage(tables: dict[str, pl.DataFrame]) -> dict[str, Any]:
     out["Relevant footnotes"] = {
         "column": "transactions.txn_footnote_text",
         "share_with_any_footnote": round(
-            tx.select((pl.col("txn_footnote_text") != "").mean()).item() or 0.0, 4
+            footnote_share
+            if footnote_share is not None
+            else tx.select((pl.col("txn_footnote_text") != "").mean()).item() or 0.0,
+            4,
         ),
     }
     out["Rule 10b5-1 checkbox"]["missing_share_from_2023_04"] = _null_share(
@@ -193,17 +204,57 @@ def price_coverage(settings: Settings) -> dict[str, Any]:
     }
 
 
+HEAVY_TRANSACTION_COLUMNS = (
+    "txn_footnote_text",
+    "holding_footnote_text",
+    "txn_footnote_ids",
+    "holding_footnote_ids",
+    "nature_of_ownership",
+)
+
+
+def staged_quality(
+    settings: Settings, quarters: list[str]
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Date-parse failures and duplicate counts, accumulated one quarter at a time."""
+    parse: dict[str, int] = {}
+    dups: dict[str, int] = {}
+    for q in quarters:
+        staged = {
+            t: load_staged(staging_dir(settings), t, [q])
+            for t in ("submission", "reportingowner", "nonderiv_trans")
+        }
+        for k, v in date_parse_failures(staged).items():
+            parse[k] = parse.get(k, 0) + v
+        d = duplicates(staged, staged["submission"])
+        for k, v in d.items():
+            dups[k] = dups.get(k, 0) + v
+    return parse, dups
+
+
 def audit(settings: Settings, quarters: list[str], index_frames: dict[str, pl.DataFrame]):
-    staged = {
-        t: load_staged(staging_dir(settings), t, quarters)
-        for t in ("submission", "reportingowner", "nonderiv_trans", "deriv_trans")
-    }
+    parse_failures, dup_counts = staged_quality(settings, quarters)
+    all_cols = pl.read_parquet_schema(processed_dir(settings) / "transactions.parquet").keys()
     tables = {
-        n: load_processed(settings, n)
-        for n in ("filings", "transactions", "insider_events", "insider_groups")
+        "transactions": load_processed(
+            settings,
+            "transactions",
+            [c for c in all_cols if c not in HEAVY_TRANSACTION_COLUMNS],
+        ),
+        **{n: load_processed(settings, n) for n in ("filings", "insider_events", "insider_groups")},
     }
+    footnote_share = (
+        scan_processed(settings, "transactions")
+        .filter(pl.col("trans_code").is_in(["P", "S"]) & (pl.col("table") == "nonderiv"))
+        .select((pl.col("txn_footnote_text") != "").mean())
+        .collect()
+        .item()
+    )
     filings = tables["filings"]
     tx = tables["transactions"]
+    dup_counts["duplicate_accessions_across_quarters"] = (
+        filings.height - filings["accession_number"].n_unique()
+    )
     ds = SecDataSets(settings, client=None)  # type: ignore[arg-type]
     downloads = ds.manifest.records()
     registry = SchemaRegistry(settings.data_dir / "manifests" / "sec_schemas.json").load()
@@ -230,9 +281,9 @@ def audit(settings: Settings, quarters: list[str], index_frames: dict[str, pl.Da
             "transaction_date": [str(tx["trans_date"].min()), str(tx["trans_date"].max())],
             "transaction_dates_after_filing_date": tx.filter(pl.col("filing_lag_days") < 0).height,
         },
-        "field_coverage": field_coverage(tables),
-        "date_parse_failures": date_parse_failures(staged),
-        "duplicates": duplicates(staged, filings),
+        "field_coverage": field_coverage(tables, footnote_share),
+        "date_parse_failures": parse_failures,
+        "duplicates": dup_counts,
         "timestamps": timestamp_quality(filings),
         "amendments": _counts(
             filings.filter(pl.col("is_amendment")), "document_type", "amend_link_confidence"

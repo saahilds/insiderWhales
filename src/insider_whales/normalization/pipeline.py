@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from pathlib import Path
 
@@ -9,14 +11,18 @@ import polars as pl
 
 from insider_whales.config import Settings
 from insider_whales.ingestion.sec import TABLES, SecDataSets
+from insider_whales.io.cache import sha256_file
 from insider_whales.io.manifest import Manifest
 from insider_whales.normalization.staging import load_staged, stage_archive
-from insider_whales.normalization.transactions import normalize_tables
+from insider_whales.normalization.transactions import (
+    build_global_tables,
+    build_transaction_tables,
+)
 
 log = logging.getLogger(__name__)
 
 STAGING_VERSION = "1"
-NORMALIZE_VERSION = "1"
+NORMALIZE_VERSION = "2"
 
 
 def staging_dir(settings: Settings) -> Path:
@@ -64,41 +70,107 @@ def stage_quarters(settings: Settings, quarters: list[str] | None = None) -> lis
     return staged
 
 
-def normalize(settings: Settings, quarters: list[str] | None = None) -> dict[str, int]:
-    """Stage, then rebuild all processed SEC tables from the selected staged quarters."""
+def _fingerprint(settings: Settings, quarter_shas: dict[str, str], ts_path: Path) -> str:
+    """Identifies every input of the processed tables; a changed input rebuilds the parts."""
+    payload = {
+        "version": NORMALIZE_VERSION,
+        "quarters": quarter_shas,
+        "availability": settings.availability.model_dump(mode="json"),
+        "timestamps": sha256_file(ts_path) if ts_path.exists() else None,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+
+def normalize(
+    settings: Settings, quarters: list[str] | None = None, *, stop_after: int | None = None
+) -> dict[str, int]:
+    """Stage, then rebuild the processed SEC tables.
+
+    Filings, owners and insider groups are built across all quarters at once (amendments and
+    groups cross quarter boundaries). Transaction lines and insider events are built one source
+    quarter at a time into `_parts/`, so memory stays bounded and an interrupted run resumes
+    with the quarters that are still missing. `stop_after` interrupts after that many newly
+    built quarters (used to demonstrate resumption).
+    """
     qs = stage_quarters(settings, quarters)
     if not qs:
         raise RuntimeError("nothing to normalize; run download-sec first")
-    staged = {}
-    for t in TABLES:
-        try:
-            staged[t.lower()] = load_staged(staging_dir(settings), t, qs)
-        except FileNotFoundError:
-            continue
-    ts_path = processed_dir(settings) / "filing_timestamps.parquet"
+    ds = SecDataSets(settings, client=None)  # type: ignore[arg-type]
+    shas = {q: ds.current(q)["sha256"] for q in qs}  # type: ignore[index]
+    out = processed_dir(settings)
+    out.mkdir(parents=True, exist_ok=True)
+    ts_path = out / "filing_timestamps.parquet"
     timestamps = pl.read_parquet(ts_path) if ts_path.exists() else None
     if timestamps is None:
         log.warning("no acceptance timestamps; run `acceptance-times` (using filing dates)")
-    tables = normalize_tables(staged, settings.availability, timestamps)
-    out = processed_dir(settings)
-    out.mkdir(parents=True, exist_ok=True)
-    for name, df in tables.items():
-        df.write_parquet(out / f"{name}.parquet")
-    Manifest(settings.data_dir / "manifests" / "pipeline_steps.jsonl").append(
-        {
-            "key": "normalize",
-            "quarters": qs,
-            "version": NORMALIZE_VERSION,
-            "rows": {k: v.height for k, v in tables.items()},
-        }
+    fingerprint = _fingerprint(settings, shas, ts_path)
+    steps = Manifest(settings.data_dir / "manifests" / "pipeline_steps.jsonl")
+
+    g = build_global_tables(
+        load_staged(staging_dir(settings), "SUBMISSION", qs),
+        load_staged(staging_dir(settings), "REPORTINGOWNER", qs),
+        settings.availability,
+        timestamps,
     )
-    return {k: v.height for k, v in tables.items()}
+    for name in ("filings", "reporting_owners", "insider_groups"):
+        g[name].write_parquet(out / f"{name}.parquet")
+
+    parts = out / "_parts"
+    built = 0
+    for q in qs:
+        marker = steps.latest("key", f"normalize_part:{q}")
+        done = all(
+            (parts / t / f"{q}.parquet").exists() for t in ("transactions", "insider_events")
+        )
+        if marker and marker.get("fingerprint") == fingerprint and done:
+            continue
+        if stop_after is not None and built >= stop_after:
+            raise KeyboardInterrupt(f"stopped after {built} quarters (simulated interruption)")
+        staged = {}
+        for t in TABLES:
+            if t in ("SUBMISSION", "REPORTINGOWNER", "OWNER_SIGNATURE"):
+                continue
+            try:
+                staged[t.lower()] = load_staged(staging_dir(settings), t, [q])
+            except FileNotFoundError:
+                continue
+        quarter_filings = g["filings"].filter(pl.col("source_quarter") == q)
+        tables = build_transaction_tables(staged, {**g, "filings": quarter_filings})
+        for name, df in tables.items():
+            dest = parts / name / f"{q}.parquet"
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            tmp = dest.with_suffix(".tmp")
+            df.write_parquet(tmp)
+            tmp.replace(dest)
+        steps.append(
+            {
+                "key": f"normalize_part:{q}",
+                "fingerprint": fingerprint,
+                "rows": {k: v.height for k, v in tables.items()},
+            }
+        )
+        built += 1
+        log.info("normalized %s (%d lines)", q, tables["transactions"].height)
+
+    counts = {k: g[k].height for k in ("filings", "reporting_owners", "insider_groups")}
+    for name in ("transactions", "insider_events"):
+        files = [parts / name / f"{q}.parquet" for q in qs]
+        tmp = out / f"{name}.parquet.tmp"
+        pl.scan_parquet(files).sink_parquet(tmp)
+        tmp.replace(out / f"{name}.parquet")
+        counts[name] = pl.scan_parquet(out / f"{name}.parquet").select(pl.len()).collect().item()
+    steps.append({"key": "normalize", "quarters": qs, "version": NORMALIZE_VERSION, "rows": counts})
+    return counts
 
 
 def build_timestamps(
     settings: Settings, quarters: list[str] | None = None, **kwargs
 ) -> pl.DataFrame:
-    """Fetch acceptance timestamps for all staged filings and store them as processed data."""
+    """Fetch acceptance timestamps for staged filings not yet resolved and store them.
+
+    Accessions already present in `filing_timestamps.parquet` are never looked up again, so a
+    rerun after an interruption only does the remaining work.
+    """
     import asyncio
 
     from insider_whales.ingestion.edgar_meta import build_filing_timestamps
@@ -106,15 +178,30 @@ def build_timestamps(
     qs = stage_quarters(settings, quarters)
     submission = load_staged(staging_dir(settings), "SUBMISSION", qs)
     owners = load_staged(staging_dir(settings), "REPORTINGOWNER", qs)
-    ts = asyncio.run(build_filing_timestamps(settings, submission, owners, **kwargs))
     out = processed_dir(settings)
     out.mkdir(parents=True, exist_ok=True)
     path = out / "filing_timestamps.parquet"
-    if path.exists():
-        ts = pl.concat([ts, pl.read_parquet(path)]).unique("accession_number", keep="first")
+    known = pl.read_parquet(path) if path.exists() else None
+    if known is not None:
+        submission = submission.join(
+            known.select("accession_number"), on="accession_number", how="anti"
+        )
+        owners = owners.join(
+            submission.select("accession_number"), on="accession_number", how="semi"
+        )
+    if submission.height:
+        ts = asyncio.run(build_filing_timestamps(settings, submission, owners, **kwargs))
+        if known is not None:
+            ts = pl.concat([ts, known]).unique("accession_number", keep="first")
+    else:
+        ts = known
     ts.sort("accession_number").write_parquet(path)
     return ts
 
 
-def load_processed(settings: Settings, name: str) -> pl.DataFrame:
-    return pl.read_parquet(processed_dir(settings) / f"{name}.parquet")
+def load_processed(settings: Settings, name: str, columns: list[str] | None = None) -> pl.DataFrame:
+    return pl.read_parquet(processed_dir(settings) / f"{name}.parquet", columns=columns)
+
+
+def scan_processed(settings: Settings, name: str) -> pl.LazyFrame:
+    return pl.scan_parquet(processed_dir(settings) / f"{name}.parquet")

@@ -6,7 +6,7 @@ This is a research tool only. It does not trade, and negative findings are valid
 
 ## Status
 
-Milestone 1 (data feasibility) is in progress. See [PROGRESS.md](PROGRESS.md) for the checklist and [RESEARCH.md](RESEARCH.md) for decisions, data limitations and open issues.
+Milestone 1 (data feasibility) is complete; Milestone 2 (end-to-end prototype on 2012–2022) is in progress. See [PROGRESS.md](PROGRESS.md) for the checklist and [RESEARCH.md](RESEARCH.md) for decisions, data limitations and open issues.
 
 ## Setup
 
@@ -20,6 +20,14 @@ uv run pytest             # offline test suite
 ```
 
 SEC requests are identified with `SEC_USER_AGENT` and limited to at most 5 requests per second, as EDGAR's fair-access policy requires.
+
+## Running the SEC ingest
+
+```bash
+uv run insider-whales ingest-sec --start 2012q1 --end 2022q4
+```
+
+This downloads, stages, timestamps, normalizes and audits every quarter in the range. It is safe to interrupt (Ctrl-C or kill) and rerun with the same arguments: unchanged downloads are skipped by hash, finished quarters by input fingerprint, and acceptance times are only fetched for filings that do not have one yet. Needs roughly 3 GB of disk and 4 GB of memory.
 
 ## Layout
 

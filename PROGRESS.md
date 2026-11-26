@@ -14,7 +14,7 @@ Checklist by milestone. Each item lands in its own PR; tests named "T#" refer to
 
 ## Milestone 2: End-to-end prototype (2012–2022)
 
-- [ ] PR 8: full SEC ingestion 2012–2022
+- [x] PR 8: full SEC ingestion 2012–2022 (`ingest-sec`, per-quarter normalization, drift report)
 - [ ] PR 9: security master and prices at scale, coverage report
 - [ ] PR 10: fundamentals (SEC XBRL) and features (T4, T12, T13)
 - [ ] PR 11: event study engine and baseline results on development data (T18)
